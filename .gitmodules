@@ -1,3 +1,6 @@
 [submodule "submodules/docs"]
 	path = submodules/docs
 	url = https://github.com/laa66/trippie-docs.git
+[submodule "submodules/service/identity"]
+	path = submodules/service/identity
+	url = https://github.com/laa66/trippie-identity-service.git
