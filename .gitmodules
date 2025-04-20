@@ -1,0 +1,3 @@
+[submodule "submodules/docs"]
+	path = submodules/docs
+	url = https://github.com/laa66/trippie-docs.git
