@@ -1,0 +1,102 @@
+@startuml
+!theme plain
+' --- Dark Mode Styling ---
+skinparam backgroundColor #121212
+skinparam DefaultFontColor #ECECEC
+skinparam componentStyle rectangle
+
+skinparam component {
+    BackgroundColor #1E1E1E
+    BorderColor #BB86FC
+    FontColor #FFFFFF
+}
+
+skinparam package {
+    BackgroundColor #1A1A1A
+    BorderColor #03DAC6
+    FontColor #03DAC6
+}
+
+skinparam database {
+    BackgroundColor #1E1E1E
+    BorderColor #CF6679
+}
+
+skinparam queue {
+    BackgroundColor #1E1E1E
+    BorderColor #FF9800
+}
+
+skinparam cloud {
+    BackgroundColor #1E1E1E
+    BorderColor #3700B3
+}
+
+skinparam arrow {
+    Color #ECECEC
+    FontColor #ECECEC
+}
+
+' --- Components ---
+
+package "Client Side (Vue 3 + Capacitor)" {
+    [MapLibre Engine] as Maps
+    [Mobile UI / Logic] as UI
+}
+
+package "Infrastructure (Self-Hosted)" {
+    [Tile Server] as TileServer
+    ["OSM Data (.mbtiles/.pbf)"] as OSM_Data
+}
+
+package "Backend Ecosystem (Go)" {
+    [Auth Service] as Auth
+    [API Gateway] as Gateway
+    [Spatial Service] as Spatial
+    
+    queue "Message Queue (Kafka/Channels)" as Queue
+    
+    component "Content Generator (Worker)" {
+        [AI Logic] as AI
+    }
+}
+
+package "Data Layer" {
+    database "PostgreSQL + PostGIS" as DB
+    database "Cloudflare R2 (Audio)" as S3
+    database "Redis (Cache & State)" as Redis
+}
+
+cloud "External AI Services" {
+    [Gemini API] as Gemini
+    [ElevenLabs / TTS] as Eleven
+}
+
+' --- Relationships ---
+
+Maps --> TileServer : Fetch Tiles (PNG/PBF)
+TileServer --> OSM_Data : Read Geospatial Data
+
+UI --> Gateway : API Request (with JWT)
+Gateway --> Auth : Token Validation (Introspection)
+
+' Spatial & Caching
+Gateway --> Spatial : "Discover nearby POIs"
+Spatial --> Redis : 1. Check Spatial Cache
+Spatial --> DB : 2. SQL (ST_DWithin) if Cache Miss
+Spatial --> Redis : 3. Cache Result
+
+' Content Flow & Redis State
+Gateway --> Spatial : "Generate content for POI_ID"
+Spatial --> Queue : "Task: Generate for POI_ID"
+Spatial --> Redis : Set Status "Processing"
+
+Queue --> AI : Background Processing
+AI --> Gemini : Generate Text
+AI --> Eleven : Generate Audio
+AI --> S3 : Upload .mp3
+AI --> DB : Update POI (Save text & link)
+AI --> Redis : Update Status "Completed"
+
+Auth --> DB : Manage Users / Sessions
+@enduml
