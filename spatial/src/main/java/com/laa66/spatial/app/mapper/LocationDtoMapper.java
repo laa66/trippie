@@ -12,7 +12,7 @@ public class LocationDtoMapper {
         if (model == null)
             return null;
 
-        return new LocationPointDto(model.name(), model.latitude(), model.longitude());
+        return new LocationPointDto(model.name(), model.longitude(), model.latitude());
     }
 
 }
