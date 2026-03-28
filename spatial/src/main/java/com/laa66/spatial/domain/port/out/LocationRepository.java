@@ -6,4 +6,6 @@ import com.laa66.spatial.domain.model.LocationPoint;
 
 public interface LocationRepository {
     Collection<LocationPoint> findAll();
+
+    Collection<LocationPoint> findNearby(double longitude, double latitude, double radius);
 }

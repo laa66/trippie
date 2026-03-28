@@ -22,4 +22,9 @@ public class SpatialService {
         return (List<LocationPoint>) locationRepository.findAll();
     }
 
+    public List<LocationPoint> findNearby(double longitude, double latitude, double radius) {
+        log.info("SpatialService - enter find nearby");
+        return (List<LocationPoint>) locationRepository.findNearby(longitude, latitude, radius);
+    }
+
 }

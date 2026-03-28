@@ -22,7 +22,15 @@ public class PostgisLocationAdapter implements LocationRepository {
     public Collection<LocationPoint> findAll() {
         return jpaLocationRepository.findAll()
                 .stream()
-                .map(entity -> locationEntityMapper.toModel(entity))
+                .map(locationEntityMapper::toModel)
+                .toList();
+    }
+
+    @Override
+    public Collection<LocationPoint> findNearby(double longitude, double latitude, double radius) {
+        return jpaLocationRepository.findNearby(longitude, latitude, radius)
+                .stream()
+                .map(locationEntityMapper::toModel)
                 .toList();
     }
 

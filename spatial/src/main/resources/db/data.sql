@@ -1,3 +1,7 @@
 INSERT INTO location_point (name, coordinates) VALUES 
-('Wroclaw Rynek', ST_SetSRID(ST_MakePoint(17.032, 51.110), 4326)),
-('Warszawa Centrum', ST_SetSRID(ST_MakePoint(21.012, 52.230), 4326));
+('Hanoi Zakrzów', ST_SetSRID(ST_MakePoint(17.13138584736382, 51.1551937957794), 4326)),
+('Plac Kromera', ST_SetSRID(ST_MakePoint(17.066710278703642, 51.13173629442202), 4326)),
+('Pasaż Grunwaldzki', ST_SetSRID(ST_MakePoint(17.0607408364247, 51.11196302461391), 4326)),
+('Galeria Dominikańska', ST_SetSRID(ST_MakePoint(17.038804592992392, 51.108632779328445), 4326)),
+('Lotnisko Wrocław', ST_SetSRID(ST_MakePoint(16.924886710297606, 51.10607031727517), 4326)),
+('Złoty Smok Nowy Dwór', ST_SetSRID(ST_MakePoint(16.95902481418381, 51.111660104163064), 4326));
