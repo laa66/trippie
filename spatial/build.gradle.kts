@@ -29,6 +29,9 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
 
+	// geometry
+	implementation("org.locationtech.jts:jts-core:1.20.0")
+
 	// database
 	implementation("org.hibernate.orm:hibernate-spatial")
 	runtimeOnly("org.postgresql:postgresql")

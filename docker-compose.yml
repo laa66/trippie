@@ -15,6 +15,7 @@ services:
       retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./spatial/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql # initialize postgis
 
   spatial:
     build: ./spatial
