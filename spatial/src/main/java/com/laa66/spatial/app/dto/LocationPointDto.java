@@ -9,6 +9,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class LocationPointDto {
     private String name;
-    private double latitude;
     private double longitude;
+    private double latitude;
 }
