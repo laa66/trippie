@@ -31,6 +31,7 @@ dependencies {
 
 	// geometry
 	implementation("org.locationtech.jts:jts-core:1.20.0")
+	implementation("com.graphhopper.external:jackson-datatype-jts:2.21.0")
 
 	// database
 	implementation("org.hibernate.orm:hibernate-spatial")

@@ -1,3 +1,4 @@
+# spring properties
 spring:
   application:
     name: spatial
@@ -10,6 +11,11 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:pass}
     driver-class-name: org.postgresql.Driver
   jpa:
-    # hibernate:
-    #   ddl-auto: update
+    hibernate:
+      ddl-auto: validate
     show-sql: true 
+
+# server properties
+server:
+  servlet:
+    context-path: /api/v1/spatial
