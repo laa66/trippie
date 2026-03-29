@@ -7,16 +7,18 @@ COPY gradle ./gradle
 COPY build.gradle.kts .
 COPY settings.gradle.kts .
 
-RUN chmod +x gradlew
-RUN ./gradlew dependencies --no-daemon
+COPY spatial/build.gradle.kts ./spatial/
 
-COPY src ./src
-RUN ./gradlew bootJar --no-daemon -x test
+RUN chmod +x gradlew
+RUN ./gradlew :spatial:dependencies --no-daemon
+
+COPY spatial/src ./spatial/src
+
+RUN ./gradlew :spatial:bootJar --no-daemon -x test
 
 # Stage 2 - runtime
 FROM eclipse-temurin:21-jdk-alpine
 WORKDIR /app
 
-COPY --from=builder /app/build/libs/*.jar app.jar
-
+COPY --from=builder /app/spatial/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

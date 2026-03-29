@@ -15,11 +15,13 @@ services:
       retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./spatial/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql # initialize postgis tables
-      - ./spatial/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql # insert initial data
+      - ./backend/spatial/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql # initialize postgis tables
+      - ./backend/spatial/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql # insert initial data
 
   spatial:
-    build: ./spatial
+    build:
+      context: ./backend
+      dockerfile: spatial/Dockerfile
     container_name: spatial
     ports:
       - "8080:8080"
