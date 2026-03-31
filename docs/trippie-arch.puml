@@ -49,7 +49,7 @@ package "Infrastructure (Self-Hosted)" {
     ["OSM Data (.mbtiles/.pbf)"] as OSM_Data
 }
 
-package "Backend Ecosystem (Go/Java)" {
+package "Backend Ecosystem (Java)" {
     [Auth Service] as Auth
     [API Gateway] as Gateway
     [Spatial Service] as Spatial
