@@ -35,6 +35,11 @@ subprojects {
         testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 	}
 
+	plugins.withType<org.springframework.boot.gradle.plugin.SpringBootPlugin> {
+        tasks.withType<org.springframework.boot.gradle.tasks.bundling.BootJar> {
+        }
+    }
+
 	tasks.withType<Test> {
 		useJUnitPlatform()
 	}
