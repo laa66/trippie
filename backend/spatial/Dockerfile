@@ -8,6 +8,7 @@ COPY build.gradle.kts .
 COPY settings.gradle.kts .
 
 COPY spatial/build.gradle.kts ./spatial/
+COPY commons/build.gradle.kts ./commons/
 
 RUN chmod +x gradlew
 RUN ./gradlew :spatial:dependencies --no-daemon
