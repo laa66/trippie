@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 
-CREATE TABLE IF NOT EXISTS wroclaw_features (
+CREATE TABLE IF NOT EXISTS location_point (
 
     id            SERIAL                PRIMARY KEY,
     osm_id        TEXT                  NOT NULL UNIQUE,
@@ -18,18 +18,18 @@ CREATE TABLE IF NOT EXISTS wroclaw_features (
     tags          JSONB                 NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX idx_wroclaw_geom
-    ON wroclaw_features USING GIST (geom);
+CREATE INDEX idx_location_point_geom
+    ON location_point USING GIST (geom);
 
 
-CREATE INDEX idx_wroclaw_artwork_type
-    ON wroclaw_features (artwork_type)
+CREATE INDEX idx_location_point_artwork_type
+    ON location_point (artwork_type)
     WHERE artwork_type IS NOT NULL;
 
 
-CREATE INDEX idx_wroclaw_name
-    ON wroclaw_features (name)
+CREATE INDEX idx_location_point_name
+    ON location_point (name)
     WHERE name IS NOT NULL;
 
-CREATE INDEX idx_wroclaw_tags_gin
-    ON wroclaw_features USING GIN (tags);
+CREATE INDEX idx_location_point_tags_gin
+    ON location_point USING GIN (tags);

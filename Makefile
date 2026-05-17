@@ -12,4 +12,4 @@ down:
 initialize-spatial-db:
 	cd spatial-loader && \
 	go mod tidy && \
-	go run main.go --dsn "postgres://user:pass@localhost:5432/spatial_db" --geojson wroclaw.geojson
+	go run main.go --dsn "postgres://user:pass@localhost:5432/spatial_db" --geojson data.geojson

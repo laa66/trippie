@@ -40,7 +40,7 @@ var dedicatedColumns = map[string]struct{}{
 }
 
 const insertSQL = `
-INSERT INTO wroclaw_features (
+INSERT INTO location_point (
     osm_id,
     geom,
     name,
@@ -131,7 +131,7 @@ func buildArgs(f Feature) ([]interface{}, error) {
 
 func main() {
 	dsn := flag.String("dsn", "", `DSN połączenia, np. "postgres://user:pass@localhost:5432/mydb"`)
-	geojsonPath := flag.String("geojson", "wroclaw.geojson", "Ścieżka do pliku GeoJSON")
+	geojsonPath := flag.String("geojson", "data.geojson", "Ścieżka do pliku GeoJSON")
 	batchSize := flag.Int("batch", 500, "Rozmiar batcha")
 	flag.Parse()
 
