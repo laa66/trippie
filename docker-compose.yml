@@ -16,7 +16,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./backend/spatial/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql # initialize postgis tables
-      - ./backend/spatial/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql # insert initial data
 
   spatial:
     build:
