@@ -2,7 +2,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 
 CREATE TABLE IF NOT EXISTS location_point (
 
-    id            SERIAL                PRIMARY KEY,
+    id            BIGSERIAL                PRIMARY KEY,
     osm_id        TEXT                  NOT NULL UNIQUE,
     geom          GEOMETRY(Point, 4326) NOT NULL,
     name          TEXT,               

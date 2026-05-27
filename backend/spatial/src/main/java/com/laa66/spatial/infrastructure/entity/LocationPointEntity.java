@@ -23,10 +23,40 @@ public class LocationPointEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "osm_id", nullable = false, unique = true)
+    private String osmId;
+
+    @Column(name = "geom", columnDefinition = "geometry(Point, 4326)")
+    private Point coordinates;
+
     @Column(name = "name")
     private String name;
 
-    @Column(name = "coordinates", columnDefinition = "geometry(Point, 4326)")
-    private Point coordinates;
+    @Column(name = "alt_name")
+    private String altName;
+
+    @Column(name = "official_name")
+    private String officialName;
+
+    @Column(name = "short_name")
+    private String shortName;
+
+    @Column(name = "name:en")
+    private String nameEn;
+
+    @Column(name = "name:pl")
+    private String namePl;
+
+    @Column(name = "description")
+    private String description;
+
+    @Column(name = "inscription")
+    private String inscription;
+
+    @Column(name = "artist_name")
+    private String artistName;
+
+    @Column(name = "artwork_type")
+    private String artworkType;
 
 }
