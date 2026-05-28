@@ -24,7 +24,7 @@ public class SpatialController {
     private final LocationDtoMapper locationDtoMapper;
 
     // TODO: rid off this endpoint, only for testing purposes
-    @GetMapping
+    @GetMapping(path = {"", "/"})
     public ResponseEntity<List<LocationPointDto>> findAll() {
         log.info("SpatialController - enter findAll");
         List<LocationPointDto> locationPoints = spatialService.findAllLocations()
