@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.laa66.spatial.app.dto.LocationPointDto;
@@ -18,13 +19,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
+@RequestMapping("/location")
 public class SpatialController {
 
     private final SpatialService spatialService;
     private final LocationDtoMapper locationDtoMapper;
 
     // TODO: rid off this endpoint, only for testing purposes
-    @GetMapping(path = {"", "/"})
+    @GetMapping
     public ResponseEntity<List<LocationPointDto>> findAll() {
         log.info("SpatialController - enter findAll");
         List<LocationPointDto> locationPoints = spatialService.findAllLocations()
