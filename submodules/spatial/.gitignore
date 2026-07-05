@@ -1,0 +1,5 @@
+.gradle/
+build/
+
+# never ignore the wrapper jar
+!gradle/wrapper/gradle-wrapper.jar
