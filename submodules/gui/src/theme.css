@@ -1,0 +1,115 @@
+/*
+ * Tailwind v4 entry (CSS-first, no tailwind.config.js).
+ *
+ * Preflight is DISABLED: instead of `@import "tailwindcss"` (which pulls in
+ * theme + preflight + utilities) we import the layers explicitly and omit
+ * `preflight.css`. Ionic ships its own reset (core/normalize/structure), so
+ * Tailwind's reset would fight Ionic's `:host` rules.
+ */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/*
+ * Single source of truth for color: the Ionic palette lives here as Tailwind
+ * theme tokens (usable as `bg-primary`, `border-danger`, ...). The `--ion-*`
+ * variables below reference these tokens, so Ionic components and Tailwind
+ * utilities always render the same colors.
+ */
+@theme {
+  --color-primary: #3880ff;
+  --color-secondary: #3dc2ff;
+  --color-tertiary: #5260ff;
+  --color-success: #2dd36f;
+  --color-warning: #ffc409;
+  --color-danger: #eb445a;
+  --color-dark: #222428;
+  --color-medium: #92949c;
+  --color-light: #f4f5f8;
+
+  /* GPS "pulse" animation for the user-location marker (no ad-hoc CSS block). */
+  --animate-map-pulse: map-pulse 2s ease-out infinite;
+
+  @keyframes map-pulse {
+    0% {
+      transform: scale(0.5);
+      opacity: 0.5;
+    }
+    70% {
+      transform: scale(1.2);
+      opacity: 0.2;
+    }
+    100% {
+      transform: scale(1.4);
+      opacity: 0;
+    }
+  }
+}
+
+/* Ionic design tokens driven by the Tailwind palette above (base = token; the
+   contrast/shade/tint/rgb variants are Ionic's standard companions). */
+:root {
+  --ion-color-primary: var(--color-primary);
+  --ion-color-primary-rgb: 56, 128, 255;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #3171e0;
+  --ion-color-primary-tint: #4c8dff;
+
+  --ion-color-secondary: var(--color-secondary);
+  --ion-color-secondary-rgb: 61, 194, 255;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #36abe0;
+  --ion-color-secondary-tint: #50c8ff;
+
+  --ion-color-tertiary: var(--color-tertiary);
+  --ion-color-tertiary-rgb: 82, 96, 255;
+  --ion-color-tertiary-contrast: #ffffff;
+  --ion-color-tertiary-contrast-rgb: 255, 255, 255;
+  --ion-color-tertiary-shade: #4854e0;
+  --ion-color-tertiary-tint: #6370ff;
+
+  --ion-color-success: var(--color-success);
+  --ion-color-success-rgb: 45, 211, 111;
+  --ion-color-success-contrast: #ffffff;
+  --ion-color-success-contrast-rgb: 255, 255, 255;
+  --ion-color-success-shade: #28ba62;
+  --ion-color-success-tint: #42d77d;
+
+  --ion-color-warning: var(--color-warning);
+  --ion-color-warning-rgb: 255, 196, 9;
+  --ion-color-warning-contrast: #000000;
+  --ion-color-warning-contrast-rgb: 0, 0, 0;
+  --ion-color-warning-shade: #e0ac08;
+  --ion-color-warning-tint: #ffca22;
+
+  --ion-color-danger: var(--color-danger);
+  --ion-color-danger-rgb: 235, 68, 90;
+  --ion-color-danger-contrast: #ffffff;
+  --ion-color-danger-contrast-rgb: 255, 255, 255;
+  --ion-color-danger-shade: #cf3c4f;
+  --ion-color-danger-tint: #ed576b;
+
+  --ion-color-dark: var(--color-dark);
+  --ion-color-dark-rgb: 34, 36, 40;
+  --ion-color-dark-contrast: #ffffff;
+  --ion-color-dark-contrast-rgb: 255, 255, 255;
+  --ion-color-dark-shade: #1e2023;
+  --ion-color-dark-tint: #383a3e;
+
+  --ion-color-medium: var(--color-medium);
+  --ion-color-medium-rgb: 146, 148, 156;
+  --ion-color-medium-contrast: #ffffff;
+  --ion-color-medium-contrast-rgb: 255, 255, 255;
+  --ion-color-medium-shade: #808289;
+  --ion-color-medium-tint: #9d9fa6;
+
+  --ion-color-light: var(--color-light);
+  --ion-color-light-rgb: 244, 245, 248;
+  --ion-color-light-contrast: #000000;
+  --ion-color-light-contrast-rgb: 0, 0, 0;
+  --ion-color-light-shade: #d7d8da;
+  --ion-color-light-tint: #f5f6f9;
+}
