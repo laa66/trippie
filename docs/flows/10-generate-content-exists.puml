@@ -1,0 +1,15 @@
+@startuml
+title 10. Generate content — already exists (cache hit)
+autonumber
+participant Client
+participant Gateway
+participant Content
+database ContentDB
+
+Client -> Gateway : POST /content/generate { poiId, mode } (Bearer)
+Gateway -> Content : forward (validated)
+Content -> ContentDB : find content by (poiId, mode)
+ContentDB --> Content : found (text and/or audioUrl)
+Content --> Client : 200 { status: COMPLETED, text?, audioUrl? }
+note right of Client : show text and/or play audio immediately
+@enduml

@@ -1,0 +1,22 @@
+@startuml
+title 9. Proximity unlock (client-side)
+autonumber
+actor User
+participant "Geolocation" as GPS
+participant Client
+participant Gateway
+participant Spatial
+
+User -> Client : walking
+GPS -> Client : watchPosition update
+Client -> Client : recompute distance to each visible POI
+alt entered any POI unlock radius
+    Client -> Client : mark POI unlocked (enable tap)
+end
+alt moved beyond current query bounds
+    Client -> Gateway : GET /spatial/nearby (new position)
+    Gateway -> Spatial : forward
+    Spatial --> Client : refreshed POIs
+end
+note right of Client : unlock is client-side (MVP).\nPersisted unlock = open question.
+@enduml

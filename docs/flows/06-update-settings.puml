@@ -1,0 +1,18 @@
+@startuml
+title 6. Update settings (content mode + categories)
+autonumber
+actor User
+participant Client
+participant Gateway
+participant Auth
+database AuthDB
+
+User -> Client : Change default mode / toggle categories
+Client -> Gateway : PUT /auth/settings (Bearer)
+Gateway -> Gateway : validate JWT
+Gateway -> Auth : forward + user id
+Auth -> Auth : validate payload (enum mode, known categories)
+Auth -> AuthDB : upsert settings
+Auth --> Client : 200 { settings }
+note right of Client : client re-queries nearby\nwith new categories
+@enduml

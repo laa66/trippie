@@ -19,76 +19,79 @@ import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent } from '@ionic/vue
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-// Importujemy Twoje composable
 import { useLocations } from '@/composables/useLocations'
 
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map | null = null
 let userMarker: L.Marker | null = null
-let watchId: number | null = null
 
-// Przechowujemy markery z bazy w tablicy, żeby móc je łatwo wyczyścić w razie potrzeby
 const apiMarkers: L.Marker[] = []
 
-// Wyciągamy potrzebne rzeczy z Twojego composable
-const { locations, isLoading, fetchLocations } = useLocations()
+const {
+  locations,
+  isLoading,
+  currentPosition,
+  startLocationWatch,
+  stopLocationWatch,
+} = useLocations()
 
-// Stylizacja markera użytkownika (pulsująca kropka)
+const userError = ref<string | null>(null)
+
 const userLocationIcon = L.divIcon({
   className: 'user-location-marker',
   html: '<div class="pulse-core"></div><div class="pulse-ring"></div>',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10]
+  iconSize: [50, 50],
+  iconAnchor: [25, 25],
 })
 
-// Funkcja odpowiedzialna za renderowanie punktów z API na mapie
 const renderApiMarkers = () => {
   if (!map) return
 
-  // Najpierw czyścimy stare markery, jeśli jakieś były (zapobiega duplikacji)
   apiMarkers.forEach(marker => marker.remove())
   apiMarkers.length = 0
 
-  // Renderujemy nowe punkty z bazy
   locations.value.forEach((loc) => {
     const marker = L.marker([loc.latitude, loc.longitude])
       .addTo(map!)
-      .bindPopup(`<b>${loc.name}</b>`) // Po kliknięciu pokaże się nazwa miejsca
+      .bindPopup(`<b>${loc.name}</b>`)
 
     apiMarkers.push(marker)
   })
 }
 
-// Obserwujemy tablicę locations. Kiedy zmieni się stan (dane przyjdą z API),
-// watch automatycznie odpali funkcję rysującą je na mapie.
 watch(locations, () => {
   renderApiMarkers()
 }, { deep: true })
 
-const getUserLocation = () => {
-  if (!navigator.geolocation) return
+watch(currentPosition, (position) => {
+  if (!map || !position) return
 
-  watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      const { latitude, longitude } = position.coords
-      if (!map) return
+  const { latitude, longitude } = position
+  if (userMarker) {
+    userMarker.setLatLng([latitude, longitude])
+    userMarker.setZIndexOffset(1000)
+  } else {
+    userMarker = L.marker([latitude, longitude], {
+      icon: userLocationIcon,
+      zIndexOffset: 1000,
+    }).addTo(map!)
+  }
 
-      if (userMarker) {
-        userMarker.setLatLng([latitude, longitude])
-      } else {
-        userMarker = L.marker([latitude, longitude], { icon: userLocationIcon }).addTo(map)
-        map.setView([latitude, longitude], 15)
-      }
-    },
-    (error) => console.error('Błąd GPS:', error.message),
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-  )
+  map.setView([latitude, longitude], 15)
+}, { deep: true })
+
+const initUserLocation = () => {
+  if (!navigator.geolocation) {
+    userError.value = 'Twoja przeglądarka nie wspiera geolokalizacji.'
+    return
+  }
+
+  startLocationWatch()
 }
 
-onMounted(async () => {
+onMounted(() => {
   if (!mapEl.value) return
 
-  // Inicjalizacja mapy
   map = L.map(mapEl.value).setView([51.1079, 17.0385], 13)
 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
@@ -96,20 +99,14 @@ onMounted(async () => {
     maxZoom: 19,
   }).addTo(map)
 
-  setTimeout(async () => {
+  setTimeout(() => {
     map?.invalidateSize()
-    getUserLocation()
-    
-    // ODPALENIE COMPOSABLE: Strzelamy do API po punkty z bazy
-    // Ponieważ funkcja jest asynchroniczna, poczeka na dane z backendu
-    await fetchLocations()
+    initUserLocation()
   }, 100)
 })
 
 onUnmounted(() => {
-  if (watchId !== null) {
-    navigator.geolocation.clearWatch(watchId)
-  }
+  stopLocationWatch()
   apiMarkers.forEach(marker => marker.remove())
   map?.remove()
   map = null
@@ -152,21 +149,23 @@ ion-content {
   display: flex;
   justify-content: center;
   align-items: center;
+  width: 50px;
+  height: 50px;
 }
 .pulse-core {
-  width: 12px;
-  height: 12px;
+  width: 24px;
+  height: 24px;
   background-color: #3880ff;
-  border: 2px solid white;
+  border: 3px solid white;
   border-radius: 50%;
   position: absolute;
   z-index: 2;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
 }
 .pulse-ring {
-  width: 24px;
-  height: 24px;
-  border: 3px solid #3880ff;
+  width: 48px;
+  height: 48px;
+  border: 4px solid #3880ff;
   border-radius: 50%;
   position: absolute;
   z-index: 1;

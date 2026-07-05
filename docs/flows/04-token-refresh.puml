@@ -1,0 +1,21 @@
+@startuml
+title 4. Token refresh (rotation)
+autonumber
+participant Client
+participant Gateway
+participant Auth
+database Redis
+
+Client -> Gateway : POST /auth/refresh { refreshToken }
+Gateway -> Auth : route
+Auth -> Redis : lookup refresh jti
+alt missing / expired / reused
+    Auth -> Redis : revoke token family (reuse detection)
+    Auth --> Client : 401 (re-login required)
+else valid
+    Auth -> Redis : delete old refresh (rotate)
+    Auth -> Redis : store new refresh jti
+    Auth -> Auth : mint new access JWT
+    Auth --> Client : 200 { accessToken, refreshToken }
+end
+@enduml

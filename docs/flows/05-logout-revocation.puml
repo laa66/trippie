@@ -1,0 +1,15 @@
+@startuml
+title 5. Logout / revocation
+autonumber
+participant Client
+participant Gateway
+participant Auth
+database Redis
+
+Client -> Gateway : POST /auth/logout (Bearer access)
+Gateway -> Auth : forward (validated)
+Auth -> Redis : delete refresh token
+Auth -> Redis : add access jti to denylist (TTL = remaining life)
+Auth --> Client : 204 No Content
+note over Gateway,Redis : subsequent requests with that\naccess token fail at step 3 (denylist)
+@enduml

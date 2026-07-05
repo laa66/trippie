@@ -1,0 +1,16 @@
+@startuml
+title 7. Discovery / nearby — cache hit
+autonumber
+participant Client
+participant Gateway
+participant Spatial
+database Redis
+
+Client -> Gateway : GET /spatial/nearby?lat&lon&radius&categories (Bearer)
+Gateway -> Gateway : validate JWT
+Gateway -> Spatial : forward
+Spatial -> Spatial : build cache key\n(rounded geohash + radius + categories)
+Spatial -> Redis : GET key
+Redis --> Spatial : cached POIs
+Spatial --> Client : 200 [POIs] (all marked locked)
+@enduml

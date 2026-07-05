@@ -1,0 +1,19 @@
+@startuml
+title 15. Ingestion — spatial-loader (batch)
+autonumber
+actor Operator
+participant "Overpass API" as Overpass
+participant "spatial-loader" as Loader
+database SpatialDB
+
+Operator -> Overpass : query tags over area
+Overpass --> Operator : GeoJSON (features with @id)
+Operator -> Loader : run --dsn --geojson
+Loader -> Loader : parse features
+loop per feature (batched)
+    Loader -> Loader : derive category from tags\nsplit dedicated cols vs tags JSONB
+    Loader -> SpatialDB : upsert location_point ON CONFLICT (osm_id)
+end
+Loader --> Operator : loaded / skipped counts
+note over Loader,SpatialDB : offline, dev + prod, off request path
+@enduml

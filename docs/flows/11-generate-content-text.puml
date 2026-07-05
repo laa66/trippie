@@ -1,0 +1,41 @@
+@startuml
+title 11. Generate content — TEXT, cache miss (async)
+autonumber
+participant Client
+participant Gateway
+participant Content
+database ContentDB
+database Redis
+queue Queue
+participant Worker
+participant Spatial
+participant Gemini
+
+Client -> Gateway : POST /content/generate { poiId, mode=TEXT }
+Gateway -> Content : forward (validated)
+Content -> ContentDB : find (poiId, TEXT)
+ContentDB --> Content : none
+Content -> Redis : SET status(poiId,TEXT)=PROCESSING (NX)
+Content -> Queue : publish GenerateTask{poiId, TEXT}
+Content --> Client : 202 Accepted { status: PROCESSING }
+
+Queue -> Worker : deliver task
+Worker -> Spatial : GET /spatial/poi/{poiId} (details for prompt)
+Spatial --> Worker : name, category, tags
+Worker -> Gemini : generate narrative text
+Gemini --> Worker : text
+Worker -> ContentDB : save { poiId, TEXT, text }
+Worker -> Redis : SET status=COMPLETED
+Worker -> Queue : ack
+
+loop until COMPLETED/FAILED
+    Client -> Gateway : GET /content/status?poiId&mode=TEXT
+    Gateway -> Content : forward
+    Content -> Redis : GET status
+    Content --> Client : { status }
+end
+Client -> Gateway : GET /content?poiId&mode=TEXT
+Gateway -> Content : forward
+Content -> ContentDB : load content
+Content --> Client : 200 { text }
+@enduml

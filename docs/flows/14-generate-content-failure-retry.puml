@@ -1,0 +1,26 @@
+@startuml
+title 14. Generate content — worker failure + retry
+autonumber
+queue Queue
+participant Worker
+participant Gemini
+database Redis
+database ContentDB
+
+Queue -> Worker : deliver task (attempt n)
+Worker -> Gemini : generate text
+alt transient error (timeout / 5xx / rate limit)
+    Gemini --> Worker : error
+    Worker -> Queue : nack (requeue, attempt n+1)
+    note over Queue : capped retries with backoff
+    alt retries exhausted
+        Queue -> Queue : route to DLQ
+        Worker -> Redis : SET status=FAILED (TTL)
+        note over Worker : status lets client stop polling\nand offer "retry"
+    end
+else success
+    Worker -> ContentDB : save content
+    Worker -> Redis : SET status=COMPLETED
+    Worker -> Queue : ack
+end
+@enduml

@@ -37,11 +37,16 @@ skinparam arrow {
     FontColor #ECECEC
 }
 
+' Legend:
+'   [MVP]    - in scope for the first end-to-end slice
+'   [LATER]  - target architecture, added after MVP works
+
 ' --- Components ---
 
-package "Client Side (Vue 3 + Capacitor)" {
-    [MapLibre Engine] as Maps
-    [Mobile UI / Logic] as UI
+package "Client Side" {
+    [Web App (Vue 3 + Ionic)] as UI
+    [MapLibre GL Engine] as Maps
+    note bottom of UI : Web-first. Capacitor\nnative wrapper = [LATER]\nPOIs locked until user\nis within unlock radius.\nContent mode: TEXT / AUDIO / BOTH
 }
 
 package "Infrastructure (Self-Hosted)" {
@@ -49,54 +54,74 @@ package "Infrastructure (Self-Hosted)" {
     ["OSM Data (.mbtiles/.pbf)"] as OSM_Data
 }
 
-package "Backend Ecosystem (Java)" {
-    [Auth Service] as Auth
+package "Data Ingestion" {
+    [spatial-loader (Go CLI)] as Loader
+    note bottom of Loader : Offline batch (dev + prod),\noff the request path.\nSource: OSM via Overpass\n(GeoJSON, keyed on @id).
+}
+
+package "Backend (Microservices, Java)" {
     [API Gateway] as Gateway
+    [Auth Service] as Auth
     [Spatial Service] as Spatial
-    
-    queue "Message Queue (Kafka/Channels)" as Queue
-    
-    component "Content Generator (Worker)" {
-        [AI Logic] as AI
+    [Content Service] as Content
+
+    queue "RabbitMQ\n(behind messaging port -> Kafka [LATER])" as Queue
+
+    component "Content Worker" {
+        [Generation Logic] as Worker
     }
 }
 
-package "Data Layer" {
-    database "PostgreSQL + PostGIS" as DB
-    database "Cloudflare R2 (Audio)" as S3
-    database "Redis (Cache & State)" as Redis
+package "Data Layer (DB-per-service, one Postgres cluster)" {
+    database "spatial_db\n(PostGIS)" as SpatialDB
+    database "auth_db" as AuthDB
+    database "content_db" as ContentDB
+    database "Redis (Cache & Gen State)" as Redis
+    database "Cloudflare R2 (Audio)" as R2
 }
 
 cloud "External AI Services" {
     [Gemini API] as Gemini
-    [ElevenLabs / TTS] as Eleven
+    [ElevenLabs TTS] as Eleven
 }
 
 ' --- Relationships ---
 
-Maps --> TileServer : Fetch Tiles (PNG/PBF)
-TileServer --> OSM_Data : Read Geospatial Data
+' Map rendering (self-hosted tiles)
+Maps --> TileServer : Fetch vector tiles
+TileServer --> OSM_Data : Read geospatial data
 
-UI --> Gateway : API Request (with JWT)
-Gateway --> Auth : Token Validation (Introspection)
+' Ingestion
+Loader --> SpatialDB : Bulk load OSM POIs (derive category)
 
-' Spatial & Caching
-Gateway --> Spatial : "Discover nearby POIs"
-Spatial --> Redis : 1. Check Spatial Cache
-Spatial --> DB : 2. SQL (ST_DWithin) if Cache Miss
-Spatial --> Redis : 3. Cache Result
+' Auth & tokens
+UI --> Gateway : API request (with access JWT)
+note right of Gateway : Validates access JWT locally\n(signature via Auth JWKS).\nChecks Redis denylist.
+Gateway --> Auth : Login / refresh (rotation) / JWKS
+Gateway --> Redis : Check access-token denylist
+Auth --> AuthDB : Users, settings (content mode, categories)
+Auth --> Redis : Refresh tokens (rotation) + denylist
 
-' Content Flow & Redis State
-Gateway --> Spatial : "Generate content for POI_ID"
-Spatial --> Queue : "Task: Generate for POI_ID"
-Spatial --> Redis : Set Status "Processing"
+' Discovery (spatial is pure geo)
+Gateway --> Spatial : Discover nearby POIs (+ selected categories)
+Spatial --> Redis : 1. Check spatial cache
+Spatial --> SpatialDB : 2. ST_DWithin + category filter on miss
+Spatial --> Redis : 3. Cache result
 
-Queue --> AI : Background Processing
-AI --> Gemini : Generate Text
-AI --> Eleven : Generate Audio
-AI --> S3 : Upload .mp3
-AI --> DB : Update POI (Save text & link)
-AI --> Redis : Update Status "Completed"
+' Content generation (orchestrated by Content, NOT Spatial)
+' Only for unlocked POIs. Mode = TEXT / AUDIO / BOTH.
+Gateway --> Content : Generate for POI_ID + mode
+Content --> ContentDB : Return existing content (POI + mode) if present
+Content --> Queue : Enqueue generation task
+Content --> Redis : Set status "Processing"
+UI --> Content : Poll generation status
 
-Auth --> DB : Manage Users / Sessions
+Queue --> Worker : Consume task
+Worker --> Spatial : Fetch POI details for prompt (API)
+Worker --> Gemini : Generate narrative text
+Worker --> Eleven : Generate audio (TTS) if AUDIO/BOTH
+Worker --> R2 : Upload .mp3 if AUDIO/BOTH
+Worker --> ContentDB : Save text and/or audio link
+Worker --> Redis : Set status "Completed"
+
 @enduml

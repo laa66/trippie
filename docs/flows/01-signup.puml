@@ -1,0 +1,23 @@
+@startuml
+title 1. Sign-up
+autonumber
+actor User
+participant Client
+participant Gateway
+participant Auth
+database AuthDB
+
+User -> Client : Enter email + password
+Client -> Gateway : POST /auth/register
+Gateway -> Auth : route (no token required)
+Auth -> AuthDB : check email uniqueness
+alt email already exists
+    Auth --> Gateway : 409 Conflict
+    Gateway --> Client : 409
+else new user
+    Auth -> Auth : hash password (bcrypt/argon2)
+    Auth -> AuthDB : insert user + default settings\n(mode=BOTH, all categories)
+    Auth --> Gateway : 201 Created
+    Gateway --> Client : 201
+end
+@enduml

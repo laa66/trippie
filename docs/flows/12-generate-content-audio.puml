@@ -1,0 +1,34 @@
+@startuml
+title 12. Generate content — AUDIO / BOTH, cache miss
+autonumber
+participant Content
+database ContentDB
+database Redis
+queue Queue
+participant Worker
+participant Spatial
+participant Gemini
+participant ElevenLabs
+database R2
+
+note over Content : entry identical to flow 11,\nmode = AUDIO or BOTH
+Content -> Redis : SET status=PROCESSING (NX)
+Content -> Queue : publish GenerateTask{poiId, mode}
+
+Queue -> Worker : deliver
+Worker -> Spatial : GET poi details
+Spatial --> Worker : details
+Worker -> Gemini : generate text (base for every mode)
+Gemini --> Worker : text
+Worker -> ElevenLabs : synthesize audio(text)
+ElevenLabs --> Worker : mp3 bytes
+Worker -> R2 : upload mp3 -> audioUrl
+R2 --> Worker : audioUrl
+alt mode = BOTH
+    Worker -> ContentDB : save { poiId, mode, text, audioUrl }
+else mode = AUDIO
+    Worker -> ContentDB : save { poiId, mode, audioUrl }\n(text retained internally)
+end
+Worker -> Redis : SET status=COMPLETED
+Worker -> Queue : ack
+@enduml

@@ -13,11 +13,11 @@ public interface JpaLocationRepository extends JpaRepository<LocationPointEntity
     @Query(value = """
             SELECT * FROM location_point
             WHERE ST_DWithin(
-                coordinates::geography,
+                geom::geography,
                 ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography,
                 :radiusMeters
             )
-            ORDER BY ST_Distance(coordinates::geography, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
+            ORDER BY ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
             ) ASC
             """, nativeQuery = true)
     List<LocationPointEntity> findNearby(@Param("longitude") double longitude, @Param("latitude") double latitude,

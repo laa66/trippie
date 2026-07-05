@@ -1,0 +1,3 @@
+# Placeholder skeleton — real services (Postgres+PostGIS, Redis, RabbitMQ, tileserver-gl,
+# gateway, spatial, gui) are added in M0-05, M0-06, M0-08.
+services: {}

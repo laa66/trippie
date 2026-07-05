@@ -1,0 +1,18 @@
+@startuml
+title 13. Generate content — duplicate request (dedup)
+autonumber
+participant Client
+participant Gateway
+participant Content
+database ContentDB
+database Redis
+
+Client -> Gateway : POST /content/generate { poiId, mode } (2nd time)
+Gateway -> Content : forward
+Content -> ContentDB : find (poiId, mode)
+ContentDB --> Content : none yet
+Content -> Redis : SET status=PROCESSING (NX)
+Redis --> Content : NOT set (already PROCESSING)
+Content --> Client : 202 { status: PROCESSING }
+note over Content,Redis : SET NX guarantees a single\nin-flight generation per (poiId, mode).\nNo duplicate task enqueued.
+@enduml

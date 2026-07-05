@@ -13,4 +13,15 @@ export class LocationService extends BaseService {
         return locationDtos.map(dto => LocationMapper.toModel(dto));
     }
 
+    async getNearbyLocations(latitude: number, longitude: number, radius: number): Promise<Location[]> {
+        const query = new URLSearchParams({
+            latitude: latitude.toString(),
+            longitude: longitude.toString(),
+            radius: radius.toString(),
+        }).toString();
+
+        const locationDtos = await this.get<LocationDto[]>(`${this.baseUrl}/location/nearby?${query}`);
+        return locationDtos.map(dto => LocationMapper.toModel(dto));
+    }
+
 }

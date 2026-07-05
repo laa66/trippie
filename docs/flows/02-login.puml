@@ -1,0 +1,24 @@
+@startuml
+title 2. Login (issue access + refresh)
+autonumber
+actor User
+participant Client
+participant Gateway
+participant Auth
+database AuthDB
+database Redis
+
+User -> Client : Enter credentials
+Client -> Gateway : POST /auth/login
+Gateway -> Auth : route
+Auth -> AuthDB : load user by email
+Auth -> Auth : verify password hash
+alt invalid credentials
+    Auth --> Client : 401 Unauthorized
+else valid
+    Auth -> Auth : mint access JWT (short TTL, signed)
+    Auth -> Redis : store refresh token (jti, TTL)
+    Auth --> Client : 200 { accessToken, refreshToken }
+    note right of Client : access token kept in memory,\nrefresh token in secure storage
+end
+@enduml

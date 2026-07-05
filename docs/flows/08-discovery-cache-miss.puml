@@ -1,0 +1,18 @@
+@startuml
+title 8. Discovery / nearby — cache miss
+autonumber
+participant Client
+participant Gateway
+participant Spatial
+database Redis
+database SpatialDB
+
+Client -> Gateway : GET /spatial/nearby?... (Bearer)
+Gateway -> Spatial : forward (validated)
+Spatial -> Redis : GET key
+Redis --> Spatial : miss
+Spatial -> SpatialDB : ST_DWithin + category IN (...) ORDER BY distance
+SpatialDB --> Spatial : rows
+Spatial -> Redis : SET key = result (TTL)
+Spatial --> Client : 200 [POIs] (locked)
+@enduml

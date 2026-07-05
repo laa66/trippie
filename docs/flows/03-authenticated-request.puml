@@ -1,0 +1,24 @@
+@startuml
+title 3. Authenticated request (local JWT validation)
+autonumber
+participant Client
+participant Gateway
+participant "Any Service" as Svc
+database Redis
+
+Client -> Gateway : GET /... (Authorization: Bearer access)
+Gateway -> Gateway : validate JWT signature locally (JWKS)\ncheck exp
+alt signature/exp invalid
+    Gateway --> Client : 401
+else valid
+    Gateway -> Redis : is jti in denylist?
+    alt denylisted (revoked)
+        Redis --> Gateway : yes
+        Gateway --> Client : 401
+    else allowed
+        Gateway -> Svc : forward request + user claims
+        Svc --> Gateway : 200 response
+        Gateway --> Client : 200
+    end
+end
+@enduml

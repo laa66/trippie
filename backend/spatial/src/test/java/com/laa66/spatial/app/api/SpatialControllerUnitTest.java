@@ -10,7 +10,6 @@ import static org.mockito.BDDMockito.given;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -20,7 +19,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.laa66.spatial.app.dto.LocationPointDto;
-import com.laa66.spatial.app.dto.SearchNearbyRequest;
 import com.laa66.spatial.app.mapper.LocationDtoMapper;
 import com.laa66.spatial.app.service.SpatialService;
 import com.laa66.spatial.domain.model.LocationPoint;
@@ -42,16 +40,16 @@ class SpatialControllerUnitTest {
     @DisplayName("Should return nearby locations and verify parsed response")
     void shouldReturnNearbyLocations() throws Exception {
         // given
-        SearchNearbyRequest request = new SearchNearbyRequest(17.1, 51.1, 1000.0);
         LocationPoint model = new LocationPoint("Park", 17.1, 51.1);
         
         given(spatialService.findNearby(anyDouble(), anyDouble(), anyDouble()))
                 .willReturn(List.of(model));
 
         // when
-        MvcResult result = mockMvc.perform(get("/nearby")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+        MvcResult result = mockMvc.perform(get("/location/nearby")
+                        .param("longitude", "17.1")
+                        .param("latitude", "51.1")
+                        .param("radius", "1000.0"))
                 .andExpect(status().isOk())
                 .andReturn();
 

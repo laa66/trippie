@@ -5,6 +5,7 @@ build-cache:
 
 up-background:
 	docker compose up -d
+	initialize-spatial-db
 
 down:
 	docker compose down -v
