@@ -1,2 +1,11 @@
 .claude/
 CLAUDE.md
+
+# M0-06 tiles: generated seed + Planetiler working data.
+# Only .gitkeep + the tileserver config.json under infra/tiles/ are tracked.
+infra/tiles/*.mbtiles
+infra/tiles/*.pbf
+infra/tiles/sources/
+infra/tiles/tmp/
+infra/tiles/*.tsv.gz
+!infra/tiles/.gitkeep

@@ -1,7 +1,6 @@
-# trippie — backing infrastructure (M0-05).
-# Data/infra layer only: Postgres (PostGIS), Redis, RabbitMQ. App services (gateway,
-# spatial, gui) and tileserver-gl are added later (M0-06 / M0-08).
-# Services reach each other by compose service name (DNS): postgres, redis, rabbitmq.
+# trippie — backing infrastructure (M0-05) + self-hosted tiles (M0-06).
+# Data/infra layer + tileserver-gl. App services (gateway, spatial, gui) are added later (M0-08).
+# Services reach each other by compose service name (DNS): postgres, redis, rabbitmq, tileserver-gl.
 # Credentials here are DEV-ONLY defaults for local infra — not secrets.
 
 name: trippie
@@ -64,6 +63,30 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
+    networks:
+      - trippie
+
+  tileserver-gl:
+    # Serves the Planetiler-generated Wroclaw seed (OpenMapTiles schema) as vector
+    # tiles + a renderable style.json. Style ("basic-preview") and glyphs ("Noto Sans
+    # Regular") are bundled in the image (tileserver-gl-styles) — no external assets.
+    # The mbtiles is produced out-of-band by `make tiles` (see repo-root Makefile) and
+    # must exist before this service starts.
+    image: maptiler/tileserver-gl:v5.2.0
+    container_name: trippie-tileserver-gl
+    command: ["--config", "/data/config.json", "--port", "8080"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./tiles/config.json:/data/config.json:ro
+      - ./tiles/wroclaw.mbtiles:/data/wroclaw.mbtiles:ro
+    healthcheck:
+      # Image ships node only (no curl/wget); hit tileserver-gl's own /health.
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - trippie
 

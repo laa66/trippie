@@ -1,0 +1,24 @@
+{
+  "options": {
+    "paths": {
+      "root": "/usr/src/app/node_modules/tileserver-gl-styles",
+      "fonts": "fonts",
+      "styles": "styles",
+      "mbtiles": "/data"
+    }
+  },
+  "styles": {
+    "basic-preview": {
+      "style": "basic-preview/style.json",
+      "tilejson": {
+        "type": "overlay",
+        "bounds": [16.80, 50.94, 17.18, 51.21]
+      }
+    }
+  },
+  "data": {
+    "v3": {
+      "mbtiles": "wroclaw.mbtiles"
+    }
+  }
+}
