@@ -1,3 +1,30 @@
 spring:
   application:
     name: gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            # M0 deliverable: gateway self-health lives at /actuator/health (below),
+            # so /health is free to prove the gateway -> spatial hop end to end.
+            - id: spatial-health
+              uri: ${SPATIAL_URI:http://spatial:8080}
+              predicates:
+                - Path=/health
+            # Convention /api/<service>/** : the /api/<service> prefix is a gateway-only
+            # concern and is stripped before forwarding, so downstream services map plain
+            # paths (StripPrefix=2 drops "api" + "spatial"). M1 spatial controllers must be
+            # written WITHOUT the /api/spatial prefix, e.g. GET /locations/nearby.
+            - id: spatial
+              uri: ${SPATIAL_URI:http://spatial:8080}
+              predicates:
+                - Path=/api/spatial/**
+              filters:
+                - StripPrefix=2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
