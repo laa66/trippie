@@ -1,3 +1,76 @@
-# Placeholder skeleton — real services (Postgres+PostGIS, Redis, RabbitMQ, tileserver-gl,
-# gateway, spatial, gui) are added in M0-05, M0-06, M0-08.
-services: {}
+# trippie — backing infrastructure (M0-05).
+# Data/infra layer only: Postgres (PostGIS), Redis, RabbitMQ. App services (gateway,
+# spatial, gui) and tileserver-gl are added later (M0-06 / M0-08).
+# Services reach each other by compose service name (DNS): postgres, redis, rabbitmq.
+# Credentials here are DEV-ONLY defaults for local infra — not secrets.
+
+name: trippie
+
+services:
+  postgres:
+    # PostGIS-capable Postgres. Pinned to match the spatial stack (PG18 + PostGIS 3.6).
+    image: postgis/postgis:18-3.6-alpine
+    container_name: trippie-postgres
+    environment:
+      POSTGRES_USER: trippie
+      POSTGRES_PASSWORD: trippie
+      # Neutral default DB; the three logical DBs are created by the init script so
+      # CREATE DATABASE does not collide with the entrypoint's own DB creation.
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/18/docker
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trippie -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - trippie
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: trippie-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - trippie
+
+  rabbitmq:
+    # -management gives the UI (15672) + rabbitmq-diagnostics for the healthcheck.
+    # Official RabbitMQ images are debian-based (no alpine variant).
+    image: rabbitmq:4.0-management
+    container_name: trippie-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: trippie
+      RABBITMQ_DEFAULT_PASS: trippie
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - trippie
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+
+networks:
+  trippie:
+    name: trippie
