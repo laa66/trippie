@@ -1,0 +1,14 @@
+# Build context for the JVM services is `submodules/`. Keep only sources; drop
+# generated artifacts, gradle caches and the node-heavy / empty modules so the
+# context transfer stays small.
+**/build
+**/.gradle
+**/node_modules
+**/dist
+**/dist-ssr
+**/.git
+gui
+auth
+content
+worker
+spatial-loader

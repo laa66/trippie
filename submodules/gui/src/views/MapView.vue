@@ -6,14 +6,15 @@
       </ion-toolbar>
     </ion-header>
     <ion-content :scroll-y="false" class="[--overflow:hidden]">
-      <div class="relative h-full w-full">
-        <div ref="mapEl" class="absolute inset-0" />
-        <div
-          v-if="geoError"
-          class="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-dark shadow-md"
-        >
-          {{ geoError }}
-        </div>
+      <!-- Anchored to ion-content (position:relative, full height). A percentage
+           height (h-full) would collapse to 0 here because ion-content sets
+           `contain: size`, so the map is sized via absolute inset instead. -->
+      <div ref="mapEl" class="absolute inset-0" />
+      <div
+        v-if="geoError"
+        class="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-dark shadow-md"
+      >
+        {{ geoError }}
       </div>
     </ion-content>
   </ion-page>
@@ -29,6 +30,7 @@ import { tileStyleUrl } from '@/lib/tiles'
 const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
 let map: MapLibreMap | null = null
 let userMarker: Marker | null = null
+let resizeObserver: ResizeObserver | null = null
 
 const { position, isFallback, error: geoError, start, stop } = useGeolocation()
 
@@ -59,6 +61,13 @@ onMounted(() => {
     },
   })
 
+  // Ionic hydrates ion-content asynchronously, so this container is often still
+  // 0x0 when the map is created — MapLibre would capture that size and render
+  // blank (trackResize only listens to the window). Observe the container and
+  // resize the map once it gains real dimensions.
+  resizeObserver = new ResizeObserver(() => map?.resize())
+  resizeObserver.observe(mapEl.value)
+
   start()
 })
 
@@ -82,6 +91,8 @@ watch(
 
 onUnmounted(() => {
   stop()
+  resizeObserver?.disconnect()
+  resizeObserver = null
   userMarker?.remove()
   userMarker = null
   map?.remove()

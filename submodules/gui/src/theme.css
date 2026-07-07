@@ -12,6 +12,15 @@
 @import 'tailwindcss/utilities.css' layer(utilities);
 
 /*
+ * MapLibre's renderer styles, pinned into @layer base. Unlayered CSS beats any
+ * layered rule, so at its default (unlayered) import maplibre's
+ * `.maplibregl-map { position: relative }` would override Tailwind's layered
+ * `.absolute` utility, collapsing the map container to 0 height. Layering it
+ * below `utilities` lets our utility classes win.
+ */
+@import 'maplibre-gl/dist/maplibre-gl.css' layer(base);
+
+/*
  * Single source of truth for color: the Ionic palette lives here as Tailwind
  * theme tokens (usable as `bg-primary`, `border-danger`, ...). The `--ion-*`
  * variables below reference these tokens, so Ionic components and Tailwind

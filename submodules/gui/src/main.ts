@@ -12,10 +12,9 @@ import '@ionic/vue/css/padding.css'
 import '@ionic/vue/css/flex-utils.css'
 import '@ionic/vue/css/display.css'
 
-/* MapLibre GL renderer styles (controls, attribution, canvas). */
-import 'maplibre-gl/dist/maplibre-gl.css'
-
-/* Tailwind entry + Ionic palette tokens. */
+/* Tailwind entry + Ionic palette tokens. MapLibre's stylesheet is imported
+   inside theme.css into @layer base so Tailwind utilities can override it (e.g.
+   .maplibregl-map's default position:relative). */
 import './theme.css'
 
 createApp(App).use(IonicVue).use(router).mount('#app')

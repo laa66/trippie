@@ -1,6 +1,20 @@
-# trippie — backing infrastructure (M0-05) + self-hosted tiles (M0-06).
-# Data/infra layer + tileserver-gl. App services (gateway, spatial, gui) are added later (M0-08).
-# Services reach each other by compose service name (DNS): postgres, redis, rabbitmq, tileserver-gl.
+# trippie — full local assembly (M0 deliverable, M0-08).
+#
+# `docker compose -f infra/docker-compose.yml up --build` brings up the M0
+# deliverable: self-hosted tiles (tileserver-gl) + app services (spatial,
+# gateway, gui). The data layer (postgres, redis, rabbitmq) sits behind the
+# `infra` profile — nothing in M0 depends on it, so it stays off by default and
+# avoids a host-port clash with any native Postgres. Add it (from M1 on) with
+# `--profile infra`.
+#
+# Single browser-facing origin: only the gui (nginx) publishes a host port
+# (8080). The browser runs on the host, outside the compose network, so it talks
+# to ONE origin — the gui — which serves the SPA and reverse-proxies /api,
+# /health and the tileserver asset paths to the internal services. gateway,
+# spatial and tileserver-gl are internal-only (reachable via compose DNS).
+#
+# Services reach each other by compose service name (DNS): postgres, redis,
+# rabbitmq, tileserver-gl, spatial, gateway.
 # Credentials here are DEV-ONLY defaults for local infra — not secrets.
 
 name: trippie
@@ -10,6 +24,7 @@ services:
     # PostGIS-capable Postgres. Pinned to match the spatial stack (PG18 + PostGIS 3.6).
     image: postgis/postgis:18-3.6-alpine
     container_name: trippie-postgres
+    profiles: [infra]
     environment:
       POSTGRES_USER: trippie
       POSTGRES_PASSWORD: trippie
@@ -17,7 +32,9 @@ services:
       # CREATE DATABASE does not collide with the entrypoint's own DB creation.
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      # dev-only: bound to loopback so it is reachable from the host for debugging
+      # but never exposed on the LAN. App services reach it via compose DNS.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/18/docker
       - ./init:/docker-entrypoint-initdb.d:ro
@@ -33,8 +50,10 @@ services:
   redis:
     image: redis:7.4-alpine
     container_name: trippie-redis
+    profiles: [infra]
     ports:
-      - "6379:6379"
+      # dev-only: loopback-bound (see postgres).
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
@@ -49,12 +68,14 @@ services:
     # Official RabbitMQ images are debian-based (no alpine variant).
     image: rabbitmq:4.0-management
     container_name: trippie-rabbitmq
+    profiles: [infra]
     environment:
       RABBITMQ_DEFAULT_USER: trippie
       RABBITMQ_DEFAULT_PASS: trippie
     ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # management UI
+      # dev-only: loopback-bound (see postgres).
+      - "127.0.0.1:5672:5672"    # AMQP
+      - "127.0.0.1:15672:15672"  # management UI
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -72,11 +93,10 @@ services:
     # Regular") are bundled in the image (tileserver-gl-styles) — no external assets.
     # The mbtiles is produced out-of-band by `make tiles` (see repo-root Makefile) and
     # must exist before this service starts.
+    # Internal-only: assets are reverse-proxied to the browser through the gui.
     image: maptiler/tileserver-gl:v5.2.0
     container_name: trippie-tileserver-gl
     command: ["--config", "/data/config.json", "--port", "8080"]
-    ports:
-      - "8080:8080"
     volumes:
       - ./tiles/config.json:/data/config.json:ro
       - ./tiles/wroclaw.mbtiles:/data/wroclaw.mbtiles:ro
@@ -87,6 +107,74 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - trippie
+
+  spatial:
+    # Composite gradle build (includeBuild ../commons) -> context is submodules/.
+    # M0: stub service exposing actuator /health at base-path / (no DB yet).
+    # M1 datasource note: when spatial gets a datasource it must point at the
+    # `postgres` service, i.e. jdbc:postgresql://postgres:5432/spatial_db
+    # (not the legacy `postgis` host).
+    build:
+      context: ../submodules
+      dockerfile: spatial/Dockerfile
+    container_name: trippie-spatial
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - trippie
+
+  gateway:
+    # Composite gradle build (includeBuild ../commons) -> context is submodules/.
+    # Routes /health -> spatial and /api/spatial/** -> spatial (StripPrefix=2).
+    # Its OWN liveness is /actuator/health ( /health is proxied to spatial ).
+    build:
+      context: ../submodules
+      dockerfile: gateway/Dockerfile
+    container_name: trippie-gateway
+    environment:
+      SPATIAL_URI: http://spatial:8080
+    depends_on:
+      spatial:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - trippie
+
+  gui:
+    # Built SPA served by nginx, which is also the single browser-facing origin:
+    # reverse-proxies /api + /health -> gateway and /styles,/data,/fonts ->
+    # tileserver-gl. VITE_TILES_URL is empty so the map style is fetched
+    # origin-relative through this proxy.
+    build:
+      context: ../submodules/gui
+      dockerfile: Dockerfile
+      args:
+        VITE_TILES_URL: ""
+    container_name: trippie-gui
+    ports:
+      - "8080:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+      tileserver-gl:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     networks:
       - trippie
 
