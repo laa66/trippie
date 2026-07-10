@@ -1,25 +1,34 @@
-.PHONY: build-cache up-background down initialize-spatial-db tiles
+.PHONY: build up down tiles
 
-build-cache:
-	docker compose build
+COMPOSE := docker compose -f infra/docker-compose.yml
+MBTILES := infra/tiles/wroclaw.mbtiles
 
-up-background:
-	docker compose up -d
-	initialize-spatial-db
+build:
+	$(COMPOSE) build
 
+# Bring up the default M0 stack (tileserver-gl, spatial, gateway, gui) detached.
+# Guard: the mbtiles must already exist as a FILE. If it is missing, Docker would
+# create a root-owned directory at the bind-mount path and tileserver-gl would
+# crash-loop — fail fast instead and point at `make tiles`.
+up:
+	@test -f "$(MBTILES)" || { \
+		echo "ERROR: $(MBTILES) missing (or not a file). Run \`make tiles\` first."; \
+		exit 1; \
+	}
+	$(COMPOSE) up -d
+
+# -v also removes the named volumes (postgres-data, rabbitmq-data) from the infra
+# profile, matching the legacy target's clean-slate behavior.
 down:
-	docker compose down -v
-
-initialize-spatial-db:
-	cd spatial-loader && \
-	go mod tidy && \
-	go run main.go --dsn "postgres://user:pass@localhost:5432/spatial_db" --geojson data.geojson
+	$(COMPOSE) down -v
 
 # --- M0-06: self-hosted tiles seed --------------------------------------------
 # Generate infra/tiles/wroclaw.mbtiles with Planetiler (basemap profile ->
 # OpenMapTiles schema) from the Geofabrik dolnoslaskie extract, cropped to a
 # Wroclaw bbox. Output + downloaded sources (.pbf, natural earth, water) are
 # gitignored. Rerunnable: --force overwrites, cached sources are reused.
+# --user keeps Planetiler artifacts host-owned (not root:root) so `make down`
+# and manual cleanup work without sudo.
 TILES_DIR      := infra/tiles
 WROCLAW_BBOX   := 16.80,50.94,17.18,51.21
 PLANETILER_IMG := ghcr.io/onthegomap/planetiler:0.9.0
@@ -27,6 +36,7 @@ PLANETILER_IMG := ghcr.io/onthegomap/planetiler:0.9.0
 tiles:
 	mkdir -p $(TILES_DIR)
 	docker run --rm \
+		--user $(shell id -u):$(shell id -g) \
 		-v "$(CURDIR)/$(TILES_DIR)":/data \
 		$(PLANETILER_IMG) \
 		--download \
