@@ -1,58 +1,86 @@
 # trippie
 
-Location-aware mobile app that discovers points of interest (artworks, monuments, landmarks
-sourced from OpenStreetMap) around the user and shows them on a live map. The long-term goal
-is an AI-generated audio guide: for a selected POI the system produces a narrated description
-(text + TTS audio) that the user can listen to on the spot.
+Location-aware app that turns the space around you into a self-guided tour. Discovers points
+of interest (artworks, monuments, landmarks) from OpenStreetMap near your position, shows them
+on a map, and (once unlocked by approach) generates AI-guided descriptions (text + narrated audio).
 
-> Status: early stage. The map + nearby-search slice works end to end. Auth, content
-> generation and audio delivery from `docs/trippie-arch.puml` are target architecture, not yet built.
+**Status: M0 skeleton.** The foundation is in place — a web app loads a map with self-hosted
+tiles, requests your geolocation, and the gateway can route to backend services. No features
+yet: POI discovery, auth, content generation, and audio playback are planned for M1–M5.
+See `docs/ARCHITECTURE.md` for the target system, and `docs/flows/` for per-flow sequence diagrams.
 
 ## Modules
 
-| Path              | Stack                          | Responsibility                                                                 |
-|-------------------|--------------------------------|--------------------------------------------------------------------------------|
-| `gui/`            | Vue 3 + Ionic + Leaflet + Vite | Mobile UI. Watches device GPS and renders nearby POIs on a map.                |
-| `backend/spatial/`| Java 21 + Spring Boot + PostGIS| Spatial service (hexagonal). Nearby-POI queries via `ST_DWithin`.              |
-| `backend/commons/`| Java                           | Shared backend code.                                                           |
-| `spatial-loader/` | Go + pgx                       | One-shot CLI that ingests an OSM GeoJSON export into the `location_point` table.|
-| `docs/`           | PlantUML                       | Target system architecture.                                                    |
-
-## Data flow (current)
-
-1. `spatial-loader` bulk-loads OSM features (GeoJSON) into PostGIS (`location_point`,
-   GiST index on `geom`, extra columns + `tags` JSONB).
-2. `gui` watches the device position and calls the spatial service with lat/lon/radius.
-3. `spatial` runs `ST_DWithin` (geography) ordered by distance and returns matching points.
-4. `gui` renders POI markers plus a pulsing user-location marker.
-
-## API
-
-Base path: `/api/v1/spatial`
-
-| Method | Path                | Params                          | Notes                          |
-|--------|---------------------|---------------------------------|--------------------------------|
-| GET    | `/location`         | —                               | Returns all points. Test-only. |
-| GET    | `/location/nearby`  | `longitude`, `latitude`, `radius` (meters) | Nearby points, distance-sorted. |
+| Path                      | Stack                                  | Status                       |
+|---------------------------|----------------------------------------|------------------------------|
+| `submodules/gui`          | Vue 3 + Ionic 8 + Tailwind v4 + MapLibre GL | Web app shell; map loads, geolocation prompt works. No POI markers yet. |
+| `submodules/spatial`      | Java 21 + Spring Boot                  | Stub; `/health` only. Controllers for nearby-POI queries (M1). |
+| `submodules/gateway`      | Spring Cloud Gateway 5.0.0             | Routes `/health` → spatial, `/api/spatial/**` → spatial. Local JWT validation planned (M2). |
+| `submodules/commons`      | Java (Gradle composite build)          | Shared backend utilities, consumed at source. |
+| `submodules/spatial-loader` | Go                                   | Build-only. OSM→PostGIS ingestion skeleton (M1). |
+| `submodules/auth`         | —                                      | Placeholder. Auth service + JWT scaffolded in M2. |
+| `submodules/content`      | —                                      | Placeholder. Content generation service scaffolded in M4. |
+| `submodules/worker`       | —                                      | Placeholder. Async content-generation worker scaffolded in M4. |
+| `infra/`                  | Docker Compose + init SQL              | Postgres (PostGIS) + Redis + RabbitMQ behind `profiles:[infra]`; tileserver-gl. |
 
 ## Running locally
 
-```bash
-# 1. Bring up PostGIS + spatial service
-make build-cache
-make up-background        # runs docker compose + loads seed data
-
-# 2. Load OSM data into PostGIS (needs spatial-loader/data.geojson)
-make initialize-spatial-db
-
-# 3. Frontend
-cd gui && npm install && npm run dev
-```
-
-Postgres defaults (docker-compose): db `spatial_db`, user `user`, pass `pass`, port `5432`.
-
-## Tests
+**Prerequisites:** Docker, `make`. The build is driven from the root `Makefile`; each
+submodule is an independent build. There is no root `docker-compose.yml` — the stack lives in
+`infra/docker-compose.yml` and `make` is the entry point.
 
 ```bash
-cd backend && ./gradlew test    # unit + Testcontainers integration tests (spatial)
+# 1. Generate self-hosted tiles (run once, then reuse the cache)
+make tiles
+# Generates infra/tiles/wroclaw.mbtiles via Planetiler (basemap → OpenMapTiles schema)
+# from the Geofabrik dolnośląskie extract, cropped to Wrocław. Gitignored; cached locally.
+
+# 2. Bring up the stack (detached)
+make up
+# Services:
+#  - gui (nginx SPA reverse-proxy): http://localhost:8080
+#  - gateway, spatial, tileserver-gl: internal only (reachable via http://localhost:8080/api, etc.)
+#  - data layer (postgres/redis/rabbitmq): off by default (see below)
+
+# 3. Tear down
+make down
 ```
+
+**Single entry point:** The browser talks to **http://localhost:8080** only — the gui's nginx.
+It serves the SPA and proxies:
+- `/api` → gateway (which routes to services)
+- `/health` → gateway (which routes to spatial)
+- `/styles`, `/data`, `/fonts` → tileserver-gl (tile assets)
+
+**Data layer (dev credentials):** Postgres, Redis and RabbitMQ sit behind `profiles: [infra]`
+and are disabled by default — M0 has no DB consumers, and keeping them off avoids clashing with
+a native Postgres on 5432. The `make` targets do not take compose flags, so start them directly:
+
+```bash
+docker compose -f infra/docker-compose.yml --profile infra up -d
+```
+
+They bind to loopback only. DEV-ONLY creds: user `trippie`, pass `trippie` (Postgres, RabbitMQ).
+No production secrets here.
+
+## Testing
+
+Each module has its own test suite:
+
+```bash
+# Backend (Gradle)
+cd submodules/commons && ./gradlew build     # commons
+cd submodules/spatial && ./gradlew build     # spatial (unit + healthcheck)
+cd submodules/gateway && ./gradlew build     # gateway (unit + integration)
+
+# Frontend (Node + vitest)
+cd submodules/gui && npm ci && npm test
+
+# OSM ingestion CLI (Go) — skeleton, no tests yet
+cd submodules/spatial-loader && go build ./... && go vet ./...
+```
+
+## What's next
+
+M1 closes the discovery slice: OSM POIs render on the map, filtered by category, and distance-sorted.
+`docs/ARCHITECTURE.md` records the MVP scope and the design decisions behind it.
