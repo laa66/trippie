@@ -1,7 +1,89 @@
 package main
 
-import "log"
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/laa66/trippie/spatial-loader/internal/overpass"
+)
 
 func main() {
-	log.Println("spatial-loader skeleton")
+	endpoint := flag.String("endpoint", overpass.DefaultEndpoint, "Overpass API endpoint")
+	bboxStr := flag.String("bbox", "", "bounding box as west,south,east,north (Planetiler order); required unless --input is set")
+	userAgent := flag.String("user-agent", "", "User-Agent header (defaults to the loader's identity)")
+	cacheFile := flag.String("cache-file", "", "write the raw upstream payload to this path")
+	inputFile := flag.String("input", "", "replay a saved payload from this path, making zero network calls")
+	maxRetries := flag.Int("max-retries", 0, "max retries on 429/504 (0 uses the built-in default)")
+	baseDelay := flag.Duration("base-delay", 0, "base backoff delay (0 uses the built-in default)")
+	queryTimeout := flag.Int("query-timeout", 0, "Overpass server-side [timeout:N] seconds (0 uses the built-in default)")
+	flag.Parse()
+
+	if err := run(*endpoint, *bboxStr, *userAgent, *cacheFile, *inputFile, *maxRetries, *baseDelay, *queryTimeout); err != nil {
+		log.Fatalf("spatial-loader: %v", err)
+	}
+}
+
+func run(endpoint, bboxStr, userAgent, cacheFile, inputFile string, maxRetries int, baseDelay time.Duration, queryTimeout int) error {
+	var bbox overpass.BBox
+	if inputFile == "" {
+		var err error
+		bbox, err = parseBBox(bboxStr)
+		if err != nil {
+			return err
+		}
+	}
+
+	client := overpass.NewClient(overpass.Config{
+		Endpoint:     endpoint,
+		UserAgent:    userAgent,
+		MaxRetries:   maxRetries,
+		BaseDelay:    baseDelay,
+		QueryTimeout: queryTimeout,
+	})
+
+	payload, err := client.Load(context.Background(), bbox, inputFile, cacheFile)
+	if err != nil {
+		return err
+	}
+
+	resp, err := overpass.Parse(payload)
+	if err != nil {
+		return err
+	}
+
+	source := "overpass"
+	if inputFile != "" {
+		source = inputFile
+	}
+	log.Printf("fetched %d elements from %s", len(resp.Elements), source)
+	if cacheFile != "" && inputFile == "" {
+		log.Printf("raw payload cached to %s", cacheFile)
+	}
+	return nil
+}
+
+// parseBBox reads "west,south,east,north" (Planetiler order). The reorder to
+// Overpass's south,west,north,east is the client's job, not the CLI's.
+func parseBBox(s string) (overpass.BBox, error) {
+	if s == "" {
+		return overpass.BBox{}, fmt.Errorf("--bbox is required (west,south,east,north)")
+	}
+	parts := strings.Split(s, ",")
+	if len(parts) != 4 {
+		return overpass.BBox{}, fmt.Errorf("--bbox must have 4 comma-separated numbers, got %d", len(parts))
+	}
+	nums := make([]float64, 4)
+	for i, p := range parts {
+		f, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return overpass.BBox{}, fmt.Errorf("--bbox value %q is not a number: %w", p, err)
+		}
+		nums[i] = f
+	}
+	return overpass.BBox{West: nums[0], South: nums[1], East: nums[2], North: nums[3]}, nil
 }
