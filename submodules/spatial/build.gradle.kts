@@ -22,29 +22,26 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 
+	// Nearby read-path: JdbcClient + native SQL (spring-boot-starter-jdbc) and startup Flyway.
+	// Boot 4 moved FlywayAutoConfiguration into the dedicated spring-boot-flyway module, so
+	// flyway-core alone does NOT migrate on startup — both are required for spatial to own and
+	// apply the location_point schema when it boots against Postgres. Compose wiring is M1-08.
+	implementation("org.springframework.boot:spring-boot-starter-jdbc")
+	implementation("org.springframework.boot:spring-boot-flyway")
+	runtimeOnly("org.flywaydb:flyway-database-postgresql")
+	runtimeOnly("org.postgresql:postgresql")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
-	// Test-scope only: this module owns the migration and the schema it describes, but no
-	// production code touches a datasource yet, and putting these on the runtime classpath
-	// would make the service refuse to boot until compose provides Postgres (M1-08).
-	//
-	// HANDOFF M1-05 — promoting this stack to production takes MORE than a scope change.
-	// Boot 4 moved FlywayAutoConfiguration out of spring-boot-autoconfigure into its own
-	// `spring-boot-flyway` module, so flyway-core alone does NOT migrate on startup: the
-	// service would come up green on an empty spatial_db and the first nearby query would
-	// fail with `relation "location_point" does not exist`. The full set is:
-	//   implementation("org.springframework.boot:spring-boot-flyway")
-	//   implementation("org.springframework.boot:spring-boot-starter-jdbc")
-	//   runtimeOnly("org.flywaydb:flyway-core")
-	//   runtimeOnly("org.flywaydb:flyway-database-postgresql")
-	//   runtimeOnly("org.postgresql:postgresql")
-	// plus spring.datasource.* in application.yaml. Compose wiring stays M1-08.
+	// spring-boot-flyway pulls flyway-core in transitively; this declares the API the M1-01
+	// migration IT uses directly (it drives the Flyway API at test-compile).
 	testImplementation("org.flywaydb:flyway-core")
-	testImplementation("org.flywaydb:flyway-database-postgresql")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
-	testRuntimeOnly("org.postgresql:postgresql")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// Activates the `test` profile (application-test.yaml) without touching any test class:
+	// startup Flyway off + DB health off so the context/health tests run without a database.
+	environment("SPRING_PROFILES_ACTIVE", "test")
 }
