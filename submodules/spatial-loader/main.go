@@ -5,10 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/laa66/trippie/spatial-loader/internal/loader"
 	"github.com/laa66/trippie/spatial-loader/internal/overpass"
 )
 
@@ -18,17 +22,25 @@ func main() {
 	userAgent := flag.String("user-agent", "", "User-Agent header (defaults to the loader's identity)")
 	cacheFile := flag.String("cache-file", "", "write the raw upstream payload to this path")
 	inputFile := flag.String("input", "", "replay a saved payload from this path, making zero network calls")
+	dsn := flag.String("dsn", "", "PostgreSQL DSN; when set, upsert the POIs into location_point (defaults to $DATABASE_URL)")
 	maxRetries := flag.Int("max-retries", 0, "max retries on 429/504 (0 uses the built-in default)")
 	baseDelay := flag.Duration("base-delay", 0, "base backoff delay (0 uses the built-in default)")
 	queryTimeout := flag.Int("query-timeout", 0, "Overpass server-side [timeout:N] seconds (0 uses the built-in default)")
 	flag.Parse()
 
-	if err := run(*endpoint, *bboxStr, *userAgent, *cacheFile, *inputFile, *maxRetries, *baseDelay, *queryTimeout); err != nil {
+	resolvedDSN := *dsn
+	if resolvedDSN == "" {
+		resolvedDSN = os.Getenv("DATABASE_URL")
+	}
+
+	if err := run(*endpoint, *bboxStr, *userAgent, *cacheFile, *inputFile, resolvedDSN, *maxRetries, *baseDelay, *queryTimeout); err != nil {
 		log.Fatalf("spatial-loader: %v", err)
 	}
 }
 
-func run(endpoint, bboxStr, userAgent, cacheFile, inputFile string, maxRetries int, baseDelay time.Duration, queryTimeout int) error {
+func run(endpoint, bboxStr, userAgent, cacheFile, inputFile, dsn string, maxRetries int, baseDelay time.Duration, queryTimeout int) error {
+	ctx := context.Background()
+
 	var bbox overpass.BBox
 	if inputFile == "" {
 		var err error
@@ -46,7 +58,7 @@ func run(endpoint, bboxStr, userAgent, cacheFile, inputFile string, maxRetries i
 		QueryTimeout: queryTimeout,
 	})
 
-	payload, err := client.Load(context.Background(), bbox, inputFile, cacheFile)
+	payload, err := client.Load(ctx, bbox, inputFile, cacheFile)
 	if err != nil {
 		return err
 	}
@@ -64,6 +76,23 @@ func run(endpoint, bboxStr, userAgent, cacheFile, inputFile string, maxRetries i
 	if cacheFile != "" && inputFile == "" {
 		log.Printf("raw payload cached to %s", cacheFile)
 	}
+
+	if dsn == "" {
+		log.Print("no DSN provided; skipping database upsert")
+		return nil
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+
+	summary, err := loader.Upsert(ctx, pool, resp.Elements)
+	if err != nil {
+		return err
+	}
+	log.Printf("upserted %d, skipped %d", summary.Upserted, summary.Skipped)
 	return nil
 }
 

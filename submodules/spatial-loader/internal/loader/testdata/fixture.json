@@ -1,0 +1,19 @@
+{
+  "version": 0.6,
+  "generator": "fixture",
+  "elements": [
+    { "type": "node", "id": 1, "lat": 51.110, "lon": 17.031, "tags": { "tourism": "artwork", "name": "Papa Krasnal", "description": "A dwarf statue", "artist_name": "Tomasz Moczek" } },
+    { "type": "node", "id": 2, "lat": 51.109, "lon": 17.032, "tags": { "historic": "monument", "tourism": "attraction", "name": "Aleksander Fredro Monument" } },
+    { "type": "way", "id": 3, "center": { "lat": 51.101, "lon": 17.045 }, "tags": { "historic": "castle", "name": "Wrocław Castle" } },
+    { "type": "way", "id": 4, "center": { "lat": 51.114, "lon": 17.033 }, "tags": { "amenity": "place_of_worship", "religion": "christian", "name": "St. Elizabeth Church" } },
+    { "type": "node", "id": 5, "lat": 51.107, "lon": 17.038, "tags": { "tourism": "museum", "name": "National Museum" } },
+    { "type": "node", "id": 6, "lat": 51.050, "lon": 17.070, "tags": { "tourism": "viewpoint", "name": "Sky Tower View" } },
+    { "type": "way", "id": 7, "center": { "lat": 51.108, "lon": 17.060 }, "tags": { "building": "yes", "architect": "Max Berg", "name": "Centennial Hall" } },
+    { "type": "node", "id": 8, "lat": 51.112, "lon": 17.030, "tags": { "tourism": "attraction", "name": "Market Square" } },
+    { "type": "way", "id": 12, "center": { "lat": 51.100, "lon": 17.020 }, "tags": { "building": "chapel", "name": "Small Chapel" } },
+    { "type": "relation", "id": 11, "center": { "lat": 51.103, "lon": 17.050 }, "tags": { "heritage": "2", "heritage:operator": "nid", "name": "Old Town Heritage Site" } },
+    { "type": "node", "id": 20, "lat": 51.111, "lon": 17.031, "tags": { "highway": "bus_stop", "name": "Rynek stop" } },
+    { "type": "node", "id": 21, "lat": 51.112, "lon": 17.032, "tags": { "amenity": "bench" } },
+    { "type": "node", "id": 22, "tags": { "tourism": "museum", "name": "Museum with no coordinates" } }
+  ]
+}
