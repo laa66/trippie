@@ -1,11 +1,11 @@
-# trippie — full local assembly (M0 deliverable, M0-08).
+# trippie — full local assembly (M0 deliverable, M0-08; M1 backend, M1-08).
 #
-# `docker compose -f infra/docker-compose.yml up --build` brings up the M0
-# deliverable: self-hosted tiles (tileserver-gl) + app services (spatial,
-# gateway, gui). The data layer (postgres, redis, rabbitmq) sits behind the
-# `infra` profile — nothing in M0 depends on it, so it stays off by default and
-# avoids a host-port clash with any native Postgres. Add it (from M1 on) with
-# `--profile infra`.
+# `docker compose -f infra/docker-compose.yml up --build` brings up the full
+# M1 backend stack: self-hosted tiles (tileserver-gl), postgres (PostGIS) and
+# app services (spatial, gateway, gui). spatial waits for postgres to be
+# healthy and runs its own Flyway migrations on startup. redis and rabbitmq
+# are not needed yet — they sit behind the `infra` profile and stay off by
+# default. Add them with `--profile infra`.
 #
 # Single browser-facing origin: only the gui (nginx) publishes a host port
 # (8080). The browser runs on the host, outside the compose network, so it talks
@@ -24,7 +24,6 @@ services:
     # PostGIS-capable Postgres. Pinned to match the spatial stack (PG18 + PostGIS 3.6).
     image: postgis/postgis:18-3.6-alpine
     container_name: trippie-postgres
-    profiles: [infra]
     environment:
       POSTGRES_USER: trippie
       POSTGRES_PASSWORD: trippie
@@ -34,12 +33,18 @@ services:
     ports:
       # dev-only: bound to loopback so it is reachable from the host for debugging
       # but never exposed on the LAN. App services reach it via compose DNS.
-      - "127.0.0.1:5432:5432"
+      # Overridable so a native Postgres on the host doesn't clash.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/18/docker
       - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trippie -d postgres"]
+      # -h 127.0.0.1 forces a TCP check. Without it, pg_isready hits the init
+      # server's unix socket (listen_addresses='') and reports healthy before
+      # 01-init-databases.sql has created spatial_db and before real TCP:5432
+      # is listening — a race that lets spatial's Flyway start against a DB
+      # that doesn't exist yet.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U trippie -d spatial_db"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -52,8 +57,8 @@ services:
     container_name: trippie-redis
     profiles: [infra]
     ports:
-      # dev-only: loopback-bound (see postgres).
-      - "127.0.0.1:6379:6379"
+      # dev-only: loopback-bound, overridable (see postgres).
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
@@ -73,9 +78,9 @@ services:
       RABBITMQ_DEFAULT_USER: trippie
       RABBITMQ_DEFAULT_PASS: trippie
     ports:
-      # dev-only: loopback-bound (see postgres).
-      - "127.0.0.1:5672:5672"    # AMQP
-      - "127.0.0.1:15672:15672"  # management UI
+      # dev-only: loopback-bound, overridable (see postgres).
+      - "127.0.0.1:${RABBITMQ_HOST_PORT:-5672}:5672"            # AMQP
+      - "127.0.0.1:${RABBITMQ_MGMT_HOST_PORT:-15672}:15672"     # management UI
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -112,14 +117,19 @@ services:
 
   spatial:
     # Composite gradle build (includeBuild ../commons) -> context is submodules/.
-    # M0: stub service exposing actuator /health at base-path / (no DB yet).
-    # M1 datasource note: when spatial gets a datasource it must point at the
-    # `postgres` service, i.e. jdbc:postgresql://postgres:5432/spatial_db
-    # (not the legacy `postgis` host).
+    # M1: datasource points at the postgres service; Flyway migrates on startup,
+    # so spatial must not start until postgres is healthy.
     build:
       context: ../submodules
       dockerfile: spatial/Dockerfile
     container_name: trippie-spatial
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/spatial_db
+      SPRING_DATASOURCE_USERNAME: trippie
+      SPRING_DATASOURCE_PASSWORD: trippie
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s

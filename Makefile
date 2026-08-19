@@ -6,7 +6,8 @@ MBTILES := infra/tiles/wroclaw.mbtiles
 build:
 	$(COMPOSE) build
 
-# Bring up the default M0 stack (tileserver-gl, spatial, gateway, gui) detached.
+# Bring up the default M1 backend stack (postgres, tileserver-gl, spatial,
+# gateway, gui) detached. redis/rabbitmq stay behind `--profile infra`.
 # Guard: the mbtiles must already exist as a FILE. If it is missing, Docker would
 # create a root-owned directory at the bind-mount path and tileserver-gl would
 # crash-loop — fail fast instead and point at `make tiles`.
@@ -17,8 +18,8 @@ up:
 	}
 	$(COMPOSE) up -d
 
-# -v also removes the named volumes (postgres-data, rabbitmq-data) from the infra
-# profile, matching the legacy target's clean-slate behavior.
+# -v also removes the named volumes (postgres-data, rabbitmq-data). Top-level
+# volumes are removed regardless of which profile (if any) their service is in.
 down:
 	$(COMPOSE) down -v
 
