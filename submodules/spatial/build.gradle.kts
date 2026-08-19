@@ -32,6 +32,9 @@ dependencies {
 	runtimeOnly("org.postgresql:postgresql")
 
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
+	// Boot 4 split @WebMvcTest slice support out of spring-boot-starter-test into its own
+	// starter (M1-06, first controller slice test in this module).
+	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	// spring-boot-flyway pulls flyway-core in transitively; this declares the API the M1-01
 	// migration IT uses directly (it drives the Flyway API at test-compile).
 	testImplementation("org.flywaydb:flyway-core")
