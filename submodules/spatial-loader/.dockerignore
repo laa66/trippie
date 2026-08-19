@@ -1,0 +1,3 @@
+# Keep the build context lean: drop the stray committed binary and VCS metadata.
+spatial-loader
+.git

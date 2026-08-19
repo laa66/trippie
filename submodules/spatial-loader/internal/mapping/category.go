@@ -4,6 +4,8 @@
 // the upsert lives in package loader (M1-03).
 package mapping
 
+import "github.com/laa66/trippie/spatial-loader/internal/osmtags"
+
 // Category is one of the eight slugs the location_point CHECK constraint
 // enforces. ResolveCategory only ever emits these — the DB CHECK is the drift
 // guard, so this list must stay in lockstep with the migration.
@@ -20,18 +22,37 @@ const (
 	Attractions  Category = "attractions"
 )
 
-// sacredBuildings are building=* values that are places of worship even without
-// an amenity=place_of_worship tag.
-var sacredBuildings = map[string]struct{}{
-	"church":    {},
-	"chapel":    {},
-	"cathedral": {},
-	"basilica":  {},
-	"monastery": {},
-	"shrine":    {},
-	"mosque":    {},
-	"synagogue": {},
-	"temple":    {},
+// sacredBuildings is the O(1) lookup for building=* values that are places of
+// worship even without an amenity=place_of_worship tag. It is derived from
+// osmtags.SacredBuildings (the shared contract) so it cannot drift from the
+// query's building regex.
+var sacredBuildings = buildSet(osmtags.SacredBuildings)
+
+func buildSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		set[v] = struct{}{}
+	}
+	return set
+}
+
+// tourismCategories maps each shared tourism=* value to its category. The value
+// vocabulary is single-sourced from osmtags.TourismPOIValues (a build-time check
+// guarantees every value there has a category here), and each value literal is
+// an osmtags constant, so the query regex and these rules cannot drift.
+var tourismCategories = map[string]Category{
+	osmtags.TourismArtwork:    PublicArt,
+	osmtags.TourismMuseum:     Museums,
+	osmtags.TourismViewpoint:  Viewpoints,
+	osmtags.TourismAttraction: Attractions,
+}
+
+func init() {
+	for _, v := range osmtags.TourismPOIValues {
+		if _, ok := tourismCategories[v]; !ok {
+			panic("mapping: osmtags.TourismPOIValues member " + v + " has no category rule")
+		}
+	}
 }
 
 // rule pairs a category with a predicate over an element's OSM tags.
@@ -46,24 +67,36 @@ type rule struct {
 // public_art -> monuments -> heritage -> sacred -> museums -> viewpoints ->
 // architecture -> attractions.
 var rules = []rule{
-	{PublicArt, func(t map[string]string) bool { return t["tourism"] == "artwork" }},
+	{PublicArt, tourismIs(PublicArt)},
 	{Monuments, func(t map[string]string) bool {
-		return t["historic"] == "monument" || t["historic"] == "memorial"
+		return t[osmtags.KeyHistoric] == "monument" || t[osmtags.KeyHistoric] == "memorial"
 	}},
-	{Heritage, func(t map[string]string) bool { return has(t, "historic") || has(t, "heritage") }},
+	{Heritage, func(t map[string]string) bool {
+		return has(t, osmtags.KeyHistoric) || has(t, osmtags.KeyHeritage)
+	}},
 	{Sacred, func(t map[string]string) bool {
-		if t["amenity"] == "place_of_worship" {
+		if t[osmtags.KeyAmenity] == osmtags.ValuePlaceOfWorship {
 			return true
 		}
-		_, ok := sacredBuildings[t["building"]]
+		_, ok := sacredBuildings[t[osmtags.KeyBuilding]]
 		return ok
 	}},
-	{Museums, func(t map[string]string) bool { return t["tourism"] == "museum" }},
-	{Viewpoints, func(t map[string]string) bool { return t["tourism"] == "viewpoint" }},
+	{Museums, tourismIs(Museums)},
+	{Viewpoints, tourismIs(Viewpoints)},
 	{Architecture, func(t map[string]string) bool {
-		return has(t, "architect") || has(t, "building:architecture")
+		return has(t, osmtags.KeyArchitect) || has(t, osmtags.KeyBuildingArchitecture)
 	}},
-	{Attractions, func(t map[string]string) bool { return t["tourism"] == "attraction" }},
+	{Attractions, tourismIs(Attractions)},
+}
+
+// tourismIs builds a predicate matching elements whose tourism=* value resolves
+// to cat. It reads the value through tourismCategories, so the tourism
+// vocabulary stays single-sourced in osmtags.
+func tourismIs(cat Category) func(map[string]string) bool {
+	return func(t map[string]string) bool {
+		got, ok := tourismCategories[t[osmtags.KeyTourism]]
+		return ok && got == cat
+	}
 }
 
 // ResolveCategory returns the highest-priority category a feature matches. The

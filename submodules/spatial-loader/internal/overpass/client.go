@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/laa66/trippie/spatial-loader/internal/osmtags"
 )
 
 // DefaultEndpoint is the public community Overpass instance.
@@ -53,9 +55,46 @@ func formatCoord(f float64) string {
 
 // Query builds the Overpass QL for the box. nwr + `out center;` makes ways and
 // relations yield a single representative point alongside nodes.
+//
+// The body is a UNION of tag-filtered nwr statements, one predicate per line, so
+// the server returns only elements that could match one of the eight mapping
+// categories instead of the entire bbox (~3.8M elements -> hundreds of MB from
+// the donated public service). The union is a deliberate SUPERSET of the loader's
+// ResolveCategory rules — client-side mapping still makes the final decision, but
+// no candidate is filtered away server-side, so the upserted set is unchanged.
+//
+// Superset derivation (see internal/mapping/category.go):
+//   - tourism in {artwork,museum,viewpoint,attraction} -> public_art/museums/
+//     viewpoints/attractions.
+//   - historic present -> heritage, and also covers monuments (historic in
+//     {monument,memorial}), so one "historic" clause serves both.
+//   - heritage present -> heritage.
+//   - amenity=place_of_worship OR building in the sacred set -> sacred.
+//   - architect present OR building:architecture present -> architecture.
 func (b BBox) Query(serverTimeout int) string {
-	return fmt.Sprintf("[out:json][timeout:%d];\nnwr(%s);\nout center;",
-		serverTimeout, b.overpassOrder())
+	box := b.overpassOrder()
+
+	// Every clause and vocabulary literal is derived from osmtags — the single
+	// source of truth the mapping rules also consume — so the query cannot drift
+	// from ResolveCategory. Order is fixed for a deterministic query.
+	clauses := []string{
+		fmt.Sprintf(`nwr[%q~%q](%s);`, osmtags.KeyTourism, anchoredAlternation(osmtags.TourismPOIValues), box),
+		fmt.Sprintf(`nwr[%q](%s);`, osmtags.KeyHistoric, box),
+		fmt.Sprintf(`nwr[%q](%s);`, osmtags.KeyHeritage, box),
+		fmt.Sprintf(`nwr[%q=%q](%s);`, osmtags.KeyAmenity, osmtags.ValuePlaceOfWorship, box),
+		fmt.Sprintf(`nwr[%q~%q](%s);`, osmtags.KeyBuilding, anchoredAlternation(osmtags.SacredBuildings), box),
+		fmt.Sprintf(`nwr[%q](%s);`, osmtags.KeyArchitect, box),
+		fmt.Sprintf(`nwr[%q](%s);`, osmtags.KeyBuildingArchitecture, box),
+	}
+
+	return fmt.Sprintf("[out:json][timeout:%d];\n(\n  %s\n);\nout center;",
+		serverTimeout, strings.Join(clauses, "\n  "))
+}
+
+// anchoredAlternation joins values into a fully anchored regex alternation,
+// e.g. ["a","b"] -> "^(a|b)$", for an Overpass ["key"~...] value filter.
+func anchoredAlternation(values []string) string {
+	return "^(" + strings.Join(values, "|") + ")$"
 }
 
 // Config configures a Client. Zero-value fields fall back to sensible defaults.

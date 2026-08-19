@@ -188,6 +188,21 @@ services:
     networks:
       - trippie
 
+  spatial-loader:
+    # One-shot POI ingest CLI (M1-04). Tools-profile: never started by `make up`,
+    # only invoked via `docker compose run --rm` from `make load-pois`.
+    build:
+      context: ../submodules/spatial-loader
+      dockerfile: Dockerfile
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgres://trippie:trippie@postgres:5432/spatial_db?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trippie
+
 volumes:
   postgres-data:
   rabbitmq-data:

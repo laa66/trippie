@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/laa66/trippie/spatial-loader/internal/osmtags"
 )
 
 // wroclaw is the Wrocław box in Planetiler order (west,south,east,north).
@@ -30,11 +32,77 @@ func (r *recordingSleeper) sleep(ctx context.Context, d time.Duration) error {
 
 func TestBBoxQueryReordersToSouthWestNorthEast(t *testing.T) {
 	q := wroclaw.Query(180)
-	if !strings.Contains(q, "nwr(50.94,16.8,51.21,17.18)") {
-		t.Fatalf("bbox not reordered to south,west,north,east: %q", q)
-	}
+	const bbox = "(50.94,16.8,51.21,17.18)"
 	if !strings.Contains(q, "out center;") || !strings.Contains(q, "[out:json]") {
 		t.Fatalf("query missing out:json / out center: %q", q)
+	}
+	if !strings.Contains(q, "[timeout:180]") {
+		t.Fatalf("query missing server-side timeout: %q", q)
+	}
+
+	// Every tag predicate that forms the superset of the mapping rules must be
+	// present AND scoped to the reordered (south,west,north,east) bbox. The
+	// expected clauses are DERIVED from osmtags — the single source of truth the
+	// mapping rules also consume — not a second literal copy of the vocabulary.
+	// So a builder that stops tracking osmtags (adds/drops/reorders a member
+	// without regenerating) fails here. Each clause carries the bbox, so we
+	// assert predicate+bbox on the same line.
+	clauses := []string{
+		`nwr["` + osmtags.KeyTourism + `"~"^(` + strings.Join(osmtags.TourismPOIValues, "|") + `)$"]` + bbox,
+		`nwr["` + osmtags.KeyHistoric + `"]` + bbox,
+		`nwr["` + osmtags.KeyHeritage + `"]` + bbox,
+		`nwr["` + osmtags.KeyAmenity + `"="` + osmtags.ValuePlaceOfWorship + `"]` + bbox,
+		`nwr["` + osmtags.KeyBuilding + `"~"^(` + strings.Join(osmtags.SacredBuildings, "|") + `)$"]` + bbox,
+		`nwr["` + osmtags.KeyArchitect + `"]` + bbox,
+		`nwr["` + osmtags.KeyBuildingArchitecture + `"]` + bbox,
+	}
+	for _, c := range clauses {
+		if !strings.Contains(q, c) {
+			t.Fatalf("query missing tag-filtered clause %q in: %q", c, q)
+		}
+	}
+
+	// Exact coupling: the value-regex alternations in the query are EXACTLY the
+	// osmtags vocabulary, in the same order — no stale extra member, none
+	// missing. Parsing the regex body back out and set-comparing to osmtags is
+	// what makes drift between the builder and the single source a test failure.
+	assertRegexAlternatives(t, q, osmtags.KeyTourism, osmtags.TourismPOIValues)
+	assertRegexAlternatives(t, q, osmtags.KeyBuilding, osmtags.SacredBuildings)
+
+	// The union must not degenerate into an unfiltered whole-bbox pull.
+	if strings.Contains(q, "nwr"+bbox+";") {
+		t.Fatalf("query still emits an unfiltered nwr(bbox) clause: %q", q)
+	}
+
+	// Count of bbox occurrences equals the number of clauses (bbox applied per
+	// clause, not once), proving no clause was left unscoped.
+	if got := strings.Count(q, bbox); got != len(clauses) {
+		t.Fatalf("expected bbox on each of %d clauses, found %d occurrences: %q", len(clauses), got, q)
+	}
+}
+
+// assertRegexAlternatives extracts the alternation body of a ["key"~"^(a|b)$"]
+// clause from the query and asserts it equals want exactly (value and order).
+func assertRegexAlternatives(t *testing.T, q, key string, want []string) {
+	t.Helper()
+	prefix := `["` + key + `"~"^(`
+	i := strings.Index(q, prefix)
+	if i < 0 {
+		t.Fatalf("no value-regex clause for key %q in query: %q", key, q)
+	}
+	rest := q[i+len(prefix):]
+	j := strings.Index(rest, `)$"`)
+	if j < 0 {
+		t.Fatalf("malformed value-regex clause for key %q in query: %q", key, q)
+	}
+	got := strings.Split(rest[:j], "|")
+	if len(got) != len(want) {
+		t.Fatalf("key %q: query regex has %d alternatives %v, osmtags has %d %v", key, len(got), got, len(want), want)
+	}
+	for k := range want {
+		if got[k] != want[k] {
+			t.Fatalf("key %q: regex alternative %d = %q, osmtags = %q (drift between builder and single source)", key, k, got[k], want[k])
+		}
 	}
 }
 

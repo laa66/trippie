@@ -1,4 +1,4 @@
-.PHONY: build up down tiles
+.PHONY: build up down tiles load-pois
 
 COMPOSE := docker compose -f infra/docker-compose.yml
 MBTILES := infra/tiles/wroclaw.mbtiles
@@ -47,3 +47,11 @@ tiles:
 		--http-timeout=120s \
 		--http-retries=3 \
 		--force
+
+# --- M1-04: one-shot POI ingest ------------------------------------------------
+# Requires a running stack (`make up` first). tools-profile: never started by
+# `make up`, only run explicitly here. bbox is the same rectangle as the tiles
+# (single-sourced from WROCLAW_BBOX above); DATABASE_URL comes from the
+# compose service's own environment.
+load-pois:
+	$(COMPOSE) run --rm spatial-loader --bbox $(WROCLAW_BBOX)
