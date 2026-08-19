@@ -16,17 +16,26 @@
       >
         {{ geoError }}
       </div>
+      <ion-fab vertical="bottom" horizontal="end" slot="fixed">
+        <ion-fab-button @click="isFilterOpen = true">
+          <ion-icon :icon="filterOutline" />
+        </ion-fab-button>
+      </ion-fab>
+      <category-filter v-model:is-open="isFilterOpen" />
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent } from '@ionic/vue'
+import { onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonFab, IonFabButton, IonIcon } from '@ionic/vue'
+import { filterOutline } from 'ionicons/icons'
 import { Map as MapLibreMap, Marker } from 'maplibre-gl'
 import { useGeolocation, WROCLAW_FALLBACK } from '@/composables/useGeolocation'
 import { tileStyleUrl } from '@/lib/tiles'
+import CategoryFilter from '@/components/CategoryFilter.vue'
 
+const isFilterOpen = ref(false)
 const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
 let map: MapLibreMap | null = null
 let userMarker: Marker | null = null
