@@ -3,6 +3,7 @@
     <ion-header>
       <ion-toolbar>
         <ion-title>Mapa</ion-title>
+        <attribution-info />
       </ion-toolbar>
     </ion-header>
     <ion-content :scroll-y="false" class="[--overflow:hidden]">
@@ -36,6 +37,7 @@ import { useNearbyPois, type UseNearbyPois } from '@/composables/useNearbyPois'
 import { useNearbyPoiLayer, type UseNearbyPoiLayer } from '@/composables/useNearbyPoiLayer'
 import { tileStyleUrl } from '@/lib/tiles'
 import CategoryFilter from '@/components/CategoryFilter.vue'
+import AttributionInfo from '@/components/AttributionInfo.vue'
 
 const isFilterOpen = ref(false)
 const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
@@ -71,6 +73,7 @@ onMounted(() => {
     center: [WROCLAW_FALLBACK.longitude, WROCLAW_FALLBACK.latitude],
     zoom: 13,
     attributionControl: {
+      compact: false,
       customAttribution: '© OpenMapTiles © OpenStreetMap contributors',
     },
   })
