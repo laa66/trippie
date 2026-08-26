@@ -33,6 +33,7 @@ import { filterOutline } from 'ionicons/icons'
 import { Map as MapLibreMap, Marker } from 'maplibre-gl'
 import { useGeolocation, WROCLAW_FALLBACK } from '@/composables/useGeolocation'
 import { useNearbyPois, type UseNearbyPois } from '@/composables/useNearbyPois'
+import { useNearbyPoiLayer, type UseNearbyPoiLayer } from '@/composables/useNearbyPoiLayer'
 import { tileStyleUrl } from '@/lib/tiles'
 import CategoryFilter from '@/components/CategoryFilter.vue'
 
@@ -41,8 +42,8 @@ const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
 let map: MapLibreMap | null = null
 let userMarker: Marker | null = null
 let resizeObserver: ResizeObserver | null = null
-// Nearby-POI state; M1-11 renders `nearby.items` as a map layer.
 let nearby: UseNearbyPois | null = null
+let poiLayer: UseNearbyPoiLayer | null = null
 let firstFixDone = false
 
 const { position, isFallback, error: geoError, start, stop } = useGeolocation()
@@ -82,6 +83,7 @@ onMounted(() => {
   resizeObserver.observe(mapEl.value)
 
   nearby = useNearbyPois(map)
+  poiLayer = useNearbyPoiLayer(map, nearby.items)
 
   start()
 })
@@ -110,6 +112,8 @@ watch(
 
 onUnmounted(() => {
   stop()
+  poiLayer?.stop()
+  poiLayer = null
   nearby?.stop()
   nearby = null
   resizeObserver?.disconnect()

@@ -1,0 +1,1 @@
+add skeletons or similar nice effect while loading data, zmiana tych 'zamknij' w dialogach
