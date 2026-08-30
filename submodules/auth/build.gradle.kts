@@ -22,21 +22,35 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 
-	// Startup Flyway owns the auth_db schema. Boot 4 moved FlywayAutoConfiguration into the
-	// dedicated spring-boot-flyway module, so flyway-core alone on the classpath does NOT
-	// migrate on startup — spring-boot-flyway is required (the same trap M1-01 documents).
-	// spring-boot-starter-jdbc supplies the DataSource + HikariCP that Flyway migrates against;
-	// M2-03 layers JPA on top of it. flyway-database-postgresql + the driver are runtime-only.
-	implementation("org.springframework.boot:spring-boot-starter-jdbc")
+	// JPA is the default persistence for auth (M2 frozen decision). starter-data-jpa also
+	// supplies the DataSource + HikariCP that startup Flyway migrates against, so no separate
+	// starter-jdbc is needed. Boot 4 moved FlywayAutoConfiguration into the dedicated
+	// spring-boot-flyway module, so flyway-core alone on the classpath does NOT migrate on
+	// startup — spring-boot-flyway is required (the same trap M1-01 documents).
+	// flyway-database-postgresql + the driver are runtime-only.
+	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-flyway")
 	runtimeOnly("org.flywaydb:flyway-database-postgresql")
 	runtimeOnly("org.postgresql:postgresql")
 
+	// OTP store (SHA-256-hashed codes with a native TTL) lives in Redis.
+	implementation("org.springframework.boot:spring-boot-starter-data-redis")
+	// Boundary validation of the register payload (@Email / @Size) -> 400 ProblemDetail.
+	implementation("org.springframework.boot:spring-boot-starter-validation")
+	// BCrypt via DelegatingPasswordEncoder. NOT spring-boot-starter-security — its filter chain
+	// would 401 every endpoint (the auth-side analog of the Flyway-module trap). Version is
+	// managed by the Boot dependency-management BOM, so no explicit version here.
+	implementation("org.springframework.security:spring-security-crypto")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
+	// @WebMvcTest moved to its own starter/autoconfigure package in Boot 4 (M1-06 finding).
+	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	// spring-boot-flyway pulls flyway-core transitively; this declares the API the M2-02
 	// migration IT drives directly at test-compile.
 	testImplementation("org.flywaydb:flyway-core")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
+	// Core Testcontainers for the redis singleton (GenericContainer) used by the M2-03 IT.
+	testImplementation("org.testcontainers:testcontainers")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

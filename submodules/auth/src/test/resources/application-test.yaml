@@ -7,8 +7,21 @@
 spring:
   flyway:
     enabled: false
+  jpa:
+    # Pin the dialect so Hibernate boots the EntityManagerFactory without probing a live
+    # connection for JDBC metadata — keeps the M2-01 context/health tests database-less. The
+    # M2-03 IT re-points the datasource + re-enables Flyway against a real container.
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    properties:
+      hibernate:
+        temp:
+          use_jdbc_metadata_defaults: false
 
 management:
   health:
     db:
+      enabled: false
+    # Redis health probes a live connection; off here so the context/health tests need no Redis.
+    # The M2-03 IT points at a real Redis container regardless of this contributor.
+    redis:
       enabled: false
