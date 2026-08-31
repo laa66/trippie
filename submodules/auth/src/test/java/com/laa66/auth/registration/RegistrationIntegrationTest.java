@@ -29,7 +29,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.laa66.auth.domain.model.OtpPurpose;
 import com.laa66.auth.domain.port.out.OtpMailer;
 import com.laa66.auth.support.AbstractPostgresIntegrationTest;
+import com.laa66.auth.support.EphemeralSigningKeyConfig;
 import com.laa66.auth.support.RedisTestContainer;
+import org.springframework.context.annotation.Import;
 
 /**
  * End-to-end registration over real Postgres + Redis (Flyway-migrated). Exercises the whole slice:
@@ -39,6 +41,7 @@ import com.laa66.auth.support.RedisTestContainer;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(EphemeralSigningKeyConfig.class)
 class RegistrationIntegrationTest extends AbstractPostgresIntegrationTest {
 
 	private static final PasswordEncoder ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();

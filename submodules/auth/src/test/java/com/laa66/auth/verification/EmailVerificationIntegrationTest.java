@@ -33,7 +33,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.laa66.auth.domain.model.OtpPurpose;
 import com.laa66.auth.domain.port.out.OtpMailer;
 import com.laa66.auth.support.AbstractPostgresIntegrationTest;
+import com.laa66.auth.support.EphemeralSigningKeyConfig;
 import com.laa66.auth.support.RedisTestContainer;
+import org.springframework.context.annotation.Import;
 
 /**
  * End-to-end verify/resend over real Postgres + Redis (Flyway-migrated). A capturing mailer stands
@@ -45,6 +47,7 @@ import com.laa66.auth.support.RedisTestContainer;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(EphemeralSigningKeyConfig.class)
 class EmailVerificationIntegrationTest extends AbstractPostgresIntegrationTest {
 
 	private static final String GENERIC_OTP_DETAIL = "invalid or expired verification code";

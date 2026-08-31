@@ -22,6 +22,14 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:redis}
       port: ${SPRING_DATA_REDIS_PORT:6379}
 
+auth:
+  jwt:
+    # External EC P-256 JWK (private material). Provisioned by M2-13 (make auth-keys -> gitignored
+    # file, mounted here); startup fails fast if unset/absent/malformed. Never committed.
+    jwk-path: ${AUTH_JWT_JWK_PATH:}
+    issuer: ${AUTH_JWT_ISSUER:https://auth.trippie.local}
+    access-token-ttl: ${AUTH_JWT_ACCESS_TOKEN_TTL:15m}
+
 management:
   endpoints:
     web:

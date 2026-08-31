@@ -42,6 +42,12 @@ dependencies {
 	// managed by the Boot dependency-management BOM, so no explicit version here.
 	implementation("org.springframework.security:spring-security-crypto")
 
+	// Access-token minting + JWKS are hand-rolled on Nimbus JOSE (M2 frozen decision — NOT Spring
+	// Authorization Server, NOT starter-security). Boot 4's BOM does not manage this coordinate
+	// (it ships with spring-security-oauth2-jose, which auth does not pull), so the version is
+	// pinned explicitly here.
+	implementation("com.nimbusds:nimbus-jose-jwt:10.0.2")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	// @WebMvcTest moved to its own starter/autoconfigure package in Boot 4 (M1-06 finding).
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
