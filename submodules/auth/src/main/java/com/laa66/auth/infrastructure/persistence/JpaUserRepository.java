@@ -1,6 +1,7 @@
 package com.laa66.auth.infrastructure.persistence;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -9,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.laa66.auth.domain.model.ContentMode;
 import com.laa66.auth.domain.model.EmailAlreadyExistsException;
+import com.laa66.auth.domain.model.UserAccount;
 import com.laa66.auth.domain.port.out.UserRepository;
 
 /** JPA-backed {@link UserRepository}: inserts the account and its seeded settings in one tx. */
@@ -26,6 +28,18 @@ class JpaUserRepository implements UserRepository {
 	@Override
 	public boolean existsByEmail(String email) {
 		return appUsers.existsByEmail(email);
+	}
+
+	@Override
+	public Optional<UserAccount> findByEmail(String email) {
+		return appUsers.findViewByEmail(email)
+				.map(v -> new UserAccount(v.getId(), v.getEmail(), v.isEmailVerified()));
+	}
+
+	@Override
+	@Transactional
+	public void markVerified(UUID userId) {
+		appUsers.markVerified(userId);
 	}
 
 	@Override
