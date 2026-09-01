@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Profile;
 import com.nimbusds.jose.jwk.ECKey;
 
 import com.laa66.auth.domain.port.in.MintAccessToken;
+import com.laa66.auth.infrastructure.security.AccessTokenVerifier;
 import com.laa66.auth.infrastructure.security.JwtKeyLoader;
 import com.laa66.auth.infrastructure.security.NimbusAccessTokenMinter;
 
@@ -36,5 +37,10 @@ class JwtConfig {
 	MintAccessToken mintAccessToken(ECKey signingKey, JwtProperties properties) {
 		return new NimbusAccessTokenMinter(signingKey, properties.issuer(), properties.accessTokenTtl(),
 				Clock.systemUTC());
+	}
+
+	@Bean
+	AccessTokenVerifier accessTokenVerifier(ECKey signingKey, JwtProperties properties) {
+		return new AccessTokenVerifier(signingKey, properties.issuer(), Clock.systemUTC());
 	}
 }

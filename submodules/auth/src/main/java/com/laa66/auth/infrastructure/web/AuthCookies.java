@@ -52,4 +52,29 @@ public class AuthCookies {
 				.maxAge(MAX_AGE)
 				.build();
 	}
+
+	/**
+	 * Expiring counterparts for logout (M2-08). A browser only drops a cookie when the clearing
+	 * Set-Cookie repeats its Path and attributes exactly, so these mirror {@link #refreshCookie} /
+	 * {@link #csrfCookie} attribute-for-attribute and differ only in an empty value + {@code Max-Age=0}.
+	 */
+	ResponseCookie clearRefreshCookie() {
+		return ResponseCookie.from(REFRESH_COOKIE, "")
+				.httpOnly(true)
+				.secure(secure)
+				.sameSite("Strict")
+				.path(PATH)
+				.maxAge(0)
+				.build();
+	}
+
+	ResponseCookie clearCsrfCookie() {
+		return ResponseCookie.from(CSRF_COOKIE, "")
+				.httpOnly(false)
+				.secure(secure)
+				.sameSite("Strict")
+				.path(PATH)
+				.maxAge(0)
+				.build();
+	}
 }

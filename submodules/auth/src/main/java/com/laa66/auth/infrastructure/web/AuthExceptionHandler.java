@@ -10,6 +10,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 import com.laa66.auth.domain.model.EmailAlreadyExistsException;
 import com.laa66.auth.domain.model.EmailNotVerifiedException;
+import com.laa66.auth.domain.model.InvalidAccessTokenException;
 import com.laa66.auth.domain.model.InvalidCredentialsException;
 import com.laa66.auth.domain.model.InvalidOtpException;
 import com.laa66.auth.domain.model.InvalidRefreshTokenException;
@@ -65,6 +66,15 @@ class AuthExceptionHandler extends ResponseEntityExceptionHandler {
 	 */
 	@ExceptionHandler(InvalidRefreshTokenException.class)
 	ProblemDetail handleInvalidRefreshToken(InvalidRefreshTokenException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+	}
+
+	/**
+	 * Uniform 401 for a logout whose bearer access token is absent, malformed, wrongly signed,
+	 * wrong-issuer, or expired — logout re-verifies the token to trust its {@code jti}/{@code exp}.
+	 */
+	@ExceptionHandler(InvalidAccessTokenException.class)
+	ProblemDetail handleInvalidAccessToken(InvalidAccessTokenException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
 	}
 

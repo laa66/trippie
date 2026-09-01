@@ -87,6 +87,21 @@ class RedisRefreshTokenStore implements RefreshTokenStore {
 			return 'OK:' .. userId
 			""", String.class);
 
+	// Logout family-revoke. KEYS[1]=tok:{presentedHash}; the family key is derived inside the script
+	// from the stored {userId}:{familyId} value. Returns 1 when a family was deleted, 0 when the token
+	// was absent/expired/unknown — an idempotent, oracle-free no-op either way.
+	private static final RedisScript<Long> DELETE_FAMILY = RedisScript.of("""
+			local tokVal = redis.call('GET', KEYS[1])
+			if not tokVal then
+				return 0
+			end
+			local sep = string.find(tokVal, ':', 1, true)
+			local userId = string.sub(tokVal, 1, sep - 1)
+			local familyId = string.sub(tokVal, sep + 1)
+			redis.call('DEL', 'auth:refresh:fam:' .. userId .. ':' .. familyId)
+			return 1
+			""", Long.class);
+
 	private final StringRedisTemplate redis;
 	private final SecureRandom random;
 
@@ -129,6 +144,11 @@ class RedisRefreshTokenStore implements RefreshTokenStore {
 		}
 		UUID userId = UUID.fromString(result.substring("OK:".length()));
 		return new RotatedToken(newToken, userId);
+	}
+
+	@Override
+	public void deleteByToken(String rawRefreshToken) {
+		redis.execute(DELETE_FAMILY, List.of(tokKey(sha256Hex(rawRefreshToken))));
 	}
 
 	static String tokKey(String tokenHash) {

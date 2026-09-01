@@ -33,4 +33,12 @@ public interface RefreshTokenStore {
 	 * concurrent rotations of the same token cannot both succeed (the loser is treated as reuse).
 	 */
 	RotatedToken rotate(String rawRefreshToken);
+
+	/**
+	 * Revokes the whole family that the presented raw token belongs to (logout, flow 05): resolves the
+	 * token to its family and deletes the family pointer, so no token in that family can refresh again.
+	 * Idempotent and silent — an absent/expired/unknown token, or an already-revoked family, is a no-op
+	 * with no signal — so a retried logout behaves identically. Stale per-token entries simply expire.
+	 */
+	void deleteByToken(String rawRefreshToken);
 }

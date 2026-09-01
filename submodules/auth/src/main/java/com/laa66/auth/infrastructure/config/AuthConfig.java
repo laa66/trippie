@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.laa66.auth.domain.port.in.LoginUser;
+import com.laa66.auth.domain.port.in.Logout;
 import com.laa66.auth.domain.port.in.MintAccessToken;
 import com.laa66.auth.domain.port.in.RefreshTokens;
 import com.laa66.auth.domain.port.in.RegisterUser;
@@ -13,11 +14,13 @@ import com.laa66.auth.domain.port.in.ResendVerification;
 import com.laa66.auth.domain.port.in.VerifyEmail;
 import com.laa66.auth.domain.port.out.OtpMailer;
 import com.laa66.auth.domain.port.out.OtpStore;
+import com.laa66.auth.domain.port.out.AccessTokenDenylist;
 import com.laa66.auth.domain.port.out.OtpThrottle;
 import com.laa66.auth.domain.port.out.PasswordHasher;
 import com.laa66.auth.domain.port.out.RefreshTokenStore;
 import com.laa66.auth.domain.port.out.UserRepository;
 import com.laa66.auth.domain.service.LoginService;
+import com.laa66.auth.domain.service.LogoutService;
 import com.laa66.auth.domain.service.OtpGenerator;
 import com.laa66.auth.domain.service.RefreshService;
 import com.laa66.auth.domain.service.RegistrationService;
@@ -70,5 +73,11 @@ class AuthConfig {
 	@Bean
 	RefreshTokens refreshTokens(RefreshTokenStore refreshTokenStore, MintAccessToken mintAccessToken) {
 		return new RefreshService(refreshTokenStore, mintAccessToken);
+	}
+
+	@Bean
+	Logout logout(RefreshTokenStore refreshTokenStore, AccessTokenDenylist accessTokenDenylist,
+			JwtProperties jwtProperties) {
+		return new LogoutService(refreshTokenStore, accessTokenDenylist, jwtProperties.clockSkew());
 	}
 }
