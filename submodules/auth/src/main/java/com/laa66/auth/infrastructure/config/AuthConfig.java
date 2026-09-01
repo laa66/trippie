@@ -5,6 +5,9 @@ import java.security.SecureRandom;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.laa66.auth.domain.port.in.LoginUser;
+import com.laa66.auth.domain.port.in.MintAccessToken;
+import com.laa66.auth.domain.port.in.RefreshTokens;
 import com.laa66.auth.domain.port.in.RegisterUser;
 import com.laa66.auth.domain.port.in.ResendVerification;
 import com.laa66.auth.domain.port.in.VerifyEmail;
@@ -12,8 +15,11 @@ import com.laa66.auth.domain.port.out.OtpMailer;
 import com.laa66.auth.domain.port.out.OtpStore;
 import com.laa66.auth.domain.port.out.OtpThrottle;
 import com.laa66.auth.domain.port.out.PasswordHasher;
+import com.laa66.auth.domain.port.out.RefreshTokenStore;
 import com.laa66.auth.domain.port.out.UserRepository;
+import com.laa66.auth.domain.service.LoginService;
 import com.laa66.auth.domain.service.OtpGenerator;
+import com.laa66.auth.domain.service.RefreshService;
 import com.laa66.auth.domain.service.RegistrationService;
 import com.laa66.auth.domain.service.ResendVerificationService;
 import com.laa66.auth.domain.service.VerificationOtpIssuer;
@@ -53,5 +59,16 @@ class AuthConfig {
 	ResendVerification resendVerification(UserRepository userRepository, OtpThrottle otpThrottle,
 			VerificationOtpIssuer verificationOtpIssuer) {
 		return new ResendVerificationService(userRepository, otpThrottle, verificationOtpIssuer);
+	}
+
+	@Bean
+	LoginUser loginUser(UserRepository userRepository, PasswordHasher passwordHasher,
+			MintAccessToken mintAccessToken, RefreshTokenStore refreshTokenStore) {
+		return new LoginService(userRepository, passwordHasher, mintAccessToken, refreshTokenStore);
+	}
+
+	@Bean
+	RefreshTokens refreshTokens(RefreshTokenStore refreshTokenStore, MintAccessToken mintAccessToken) {
+		return new RefreshService(refreshTokenStore, mintAccessToken);
 	}
 }

@@ -4,4 +4,7 @@ package com.laa66.auth.domain.port.out;
 public interface PasswordHasher {
 
 	String hash(String rawPassword);
+
+	/** Constant-time-ish BCrypt comparison; false when the password does not match the hash. */
+	boolean verify(String rawPassword, String encodedHash);
 }

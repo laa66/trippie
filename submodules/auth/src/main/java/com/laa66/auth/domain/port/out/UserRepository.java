@@ -7,6 +7,7 @@ import java.util.UUID;
 import com.laa66.auth.domain.model.ContentMode;
 import com.laa66.auth.domain.model.EmailAlreadyExistsException;
 import com.laa66.auth.domain.model.UserAccount;
+import com.laa66.auth.domain.model.UserCredentials;
 
 /** Outbound port for persisting accounts and their seeded settings. */
 public interface UserRepository {
@@ -15,6 +16,9 @@ public interface UserRepository {
 
 	/** Resolves an account by (case-insensitive) email for the public verify/resend flows. */
 	Optional<UserAccount> findByEmail(String email);
+
+	/** Resolves credentials (incl. the BCrypt hash) by (case-insensitive) email for login. */
+	Optional<UserCredentials> findCredentialsByEmail(String email);
 
 	/** Sets {@code email_verified = true}; idempotent if the account is already verified. */
 	void markVerified(UUID userId);

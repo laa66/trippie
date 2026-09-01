@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.laa66.auth.domain.model.ContentMode;
 import com.laa66.auth.domain.model.EmailAlreadyExistsException;
 import com.laa66.auth.domain.model.UserAccount;
+import com.laa66.auth.domain.model.UserCredentials;
 import com.laa66.auth.domain.port.out.UserRepository;
 
 /** JPA-backed {@link UserRepository}: inserts the account and its seeded settings in one tx. */
@@ -34,6 +35,12 @@ class JpaUserRepository implements UserRepository {
 	public Optional<UserAccount> findByEmail(String email) {
 		return appUsers.findViewByEmail(email)
 				.map(v -> new UserAccount(v.getId(), v.getEmail(), v.isEmailVerified()));
+	}
+
+	@Override
+	public Optional<UserCredentials> findCredentialsByEmail(String email) {
+		return appUsers.findCredentialsByEmail(email)
+				.map(v -> new UserCredentials(v.getId(), v.getPasswordHash(), v.isEmailVerified()));
 	}
 
 	@Override

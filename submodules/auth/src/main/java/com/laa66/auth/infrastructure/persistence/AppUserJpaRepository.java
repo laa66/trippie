@@ -15,6 +15,8 @@ interface AppUserJpaRepository extends JpaRepository<AppUser, UUID> {
 
 	Optional<AppUserView> findViewByEmail(String email);
 
+	Optional<AppUserCredentialsView> findCredentialsByEmail(String email);
+
 	@Modifying
 	@Query("update AppUser a set a.emailVerified = true where a.id = :id")
 	int markVerified(@Param("id") UUID id);
@@ -25,6 +27,20 @@ interface AppUserJpaRepository extends JpaRepository<AppUser, UUID> {
 		UUID getId();
 
 		String getEmail();
+
+		boolean isEmailVerified();
+	}
+
+	/**
+	 * Closed projection for login only: it DOES expose the BCrypt hash, which the login service
+	 * needs to verify the password. The hash stays inside the persistence + domain-service layers
+	 * (mapped to {@code UserCredentials}) and is never placed in a DTO or response.
+	 */
+	interface AppUserCredentialsView {
+
+		UUID getId();
+
+		String getPasswordHash();
 
 		boolean isEmailVerified();
 	}
