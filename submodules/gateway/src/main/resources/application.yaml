@@ -22,6 +22,28 @@ spring:
                 - Path=/api/spatial/**
               filters:
                 - StripPrefix=2
+            # Auth controllers map plain paths (/register, /login, /settings, ...); StripPrefix=2
+            # drops the gateway-only "api" + "auth" prefix. The route authorization matrix
+            # (SecurityConfig) protects these paths pre-StripPrefix. Compose wiring of AUTH_URI is
+            # M2-13.
+            - id: auth
+              uri: ${AUTH_URI:http://auth:8080}
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - StripPrefix=2
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Public JWK set fetched server-side and cached by the Nimbus decoder (fetch-on-unknown
+          # kid + TTL, decoder defaults). NOT issuer-uri: auth has no OIDC discovery document.
+          jwk-set-uri: ${AUTH_JWKS_URI:http://auth:8080/.well-known/jwks.json}
+
+# Issuer pinned by the gateway's JwtIssuerValidator; must equal auth's auth.jwt.issuer.
+auth:
+  jwt:
+    issuer: ${AUTH_JWT_ISSUER:https://auth.trippie.local}
 
 management:
   endpoints:

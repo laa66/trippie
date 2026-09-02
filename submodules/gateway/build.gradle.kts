@@ -23,6 +23,10 @@ dependencies {
 	implementation("com.laa66:commons")
 	implementation("org.springframework.cloud:spring-cloud-starter-gateway-server-webflux")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
+	// Reactive OAuth2 resource server (flow 03): pulls spring-security-config + oauth2-jose +
+	// nimbus-jose-jwt. In a WebFlux app the reactive stack (ServerHttpSecurity /
+	// ReactiveJwtDecoder) auto-activates, not the servlet variant.
+	implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
 
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
