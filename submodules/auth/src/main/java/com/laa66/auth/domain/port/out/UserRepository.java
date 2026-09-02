@@ -8,6 +8,7 @@ import com.laa66.auth.domain.model.ContentMode;
 import com.laa66.auth.domain.model.EmailAlreadyExistsException;
 import com.laa66.auth.domain.model.UserAccount;
 import com.laa66.auth.domain.model.UserCredentials;
+import com.laa66.auth.domain.model.UserSettingsData;
 
 /** Outbound port for persisting accounts and their seeded settings. */
 public interface UserRepository {
@@ -23,10 +24,19 @@ public interface UserRepository {
 	/** Sets {@code email_verified = true}; idempotent if the account is already verified. */
 	void markVerified(UUID userId);
 
+	/** Replaces the stored BCrypt hash after a successful password reset (flow NEW). */
+	void updatePasswordHash(UUID userId, String passwordHash);
+
 	/**
 	 * Inserts an unverified {@code app_user} and its seeded {@code user_settings} row in one
 	 * transaction, returning the new user id. Implementations translate a unique-email collision
 	 * (the check-then-insert race) into {@link EmailAlreadyExistsException}.
 	 */
 	UUID create(String email, String passwordHash, ContentMode defaultMode, List<String> selectedCategories);
+
+	/** Resolves the settings row for a user id (flow 06). Absent only on a deleted-user race. */
+	Optional<UserSettingsData> findSettings(UUID userId);
+
+	/** Upserts the mode + categories for an existing user and bumps {@code updated_at}. */
+	void updateSettings(UUID userId, ContentMode mode, List<String> categories);
 }

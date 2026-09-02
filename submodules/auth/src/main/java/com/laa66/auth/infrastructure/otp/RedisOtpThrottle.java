@@ -1,7 +1,6 @@
 package com.laa66.auth.infrastructure.otp;
 
 import java.util.List;
-import java.util.UUID;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -47,9 +46,9 @@ class RedisOtpThrottle implements OtpThrottle {
 	}
 
 	@Override
-	public ThrottleDecision tryAcquire(OtpPurpose purpose, UUID userId, ThrottlePolicy policy) {
+	public ThrottleDecision tryAcquire(OtpPurpose purpose, String subject, ThrottlePolicy policy) {
 		String result = redis.execute(ACQUIRE,
-				List.of(cooldownKey(purpose, userId), sendsKey(purpose, userId)),
+				List.of(cooldownKey(purpose, subject), sendsKey(purpose, subject)),
 				Long.toString(policy.cooldown().toSeconds()),
 				Integer.toString(policy.maxSends()),
 				Long.toString(policy.window().toSeconds()));
@@ -61,11 +60,13 @@ class RedisOtpThrottle implements OtpThrottle {
 		};
 	}
 
-	static String cooldownKey(OtpPurpose purpose, UUID userId) {
-		return RedisOtpStore.key(purpose, userId) + ":cooldown";
+	// Same string shape as before for the userId subject (auth:otp:{slug}:{userId}:cooldown), so the
+	// verify/resend keys are unchanged; forgot passes an email-hash subject into the same layout.
+	static String cooldownKey(OtpPurpose purpose, String subject) {
+		return "auth:otp:" + purpose.slug() + ":" + subject + ":cooldown";
 	}
 
-	static String sendsKey(OtpPurpose purpose, UUID userId) {
-		return RedisOtpStore.key(purpose, userId) + ":sends";
+	static String sendsKey(OtpPurpose purpose, String subject) {
+		return "auth:otp:" + purpose.slug() + ":" + subject + ":sends";
 	}
 }

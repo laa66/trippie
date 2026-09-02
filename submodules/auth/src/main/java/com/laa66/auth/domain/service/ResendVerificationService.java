@@ -25,10 +25,10 @@ public class ResendVerificationService implements ResendVerification {
 
 	private final UserRepository userRepository;
 	private final OtpThrottle otpThrottle;
-	private final VerificationOtpIssuer issuer;
+	private final OtpIssuer issuer;
 
 	public ResendVerificationService(UserRepository userRepository, OtpThrottle otpThrottle,
-			VerificationOtpIssuer issuer) {
+			OtpIssuer issuer) {
 		this.userRepository = userRepository;
 		this.otpThrottle = otpThrottle;
 		this.issuer = issuer;
@@ -46,6 +46,6 @@ public class ResendVerificationService implements ResendVerification {
 			throw new OtpThrottledException();
 		}
 
-		issuer.issue(account.id(), account.email());
+		issuer.issue(OtpPurpose.VERIFY, account.id(), account.email());
 	}
 }

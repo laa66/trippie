@@ -15,6 +15,7 @@ import com.laa66.auth.domain.model.InvalidCredentialsException;
 import com.laa66.auth.domain.model.InvalidOtpException;
 import com.laa66.auth.domain.model.InvalidRefreshTokenException;
 import com.laa66.auth.domain.model.OtpThrottledException;
+import com.laa66.auth.domain.model.UserSettingsNotFoundException;
 
 /**
  * Translates auth boundary failures into RFC 9457 {@link ProblemDetail}. Extending
@@ -85,5 +86,11 @@ class AuthExceptionHandler extends ResponseEntityExceptionHandler {
 		problem.setType(URI.create("urn:trippie:auth:csrf"));
 		problem.setTitle("CSRF validation failed");
 		return problem;
+	}
+
+	/** Deleted-user race on an otherwise-valid {@code X-User-Id}; unreachable with a real token. */
+	@ExceptionHandler(UserSettingsNotFoundException.class)
+	ProblemDetail handleSettingsNotFound(UserSettingsNotFoundException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
 	}
 }

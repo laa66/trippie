@@ -21,6 +21,10 @@ interface AppUserJpaRepository extends JpaRepository<AppUser, UUID> {
 	@Query("update AppUser a set a.emailVerified = true where a.id = :id")
 	int markVerified(@Param("id") UUID id);
 
+	@Modifying
+	@Query("update AppUser a set a.passwordHash = :hash where a.id = :id")
+	int updatePasswordHash(@Param("id") UUID id, @Param("hash") String hash);
+
 	/** Closed projection for the verify/resend lookup — no password hash ever leaves the DB layer. */
 	interface AppUserView {
 

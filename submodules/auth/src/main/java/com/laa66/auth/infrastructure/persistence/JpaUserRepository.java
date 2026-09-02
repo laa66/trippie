@@ -12,6 +12,8 @@ import com.laa66.auth.domain.model.ContentMode;
 import com.laa66.auth.domain.model.EmailAlreadyExistsException;
 import com.laa66.auth.domain.model.UserAccount;
 import com.laa66.auth.domain.model.UserCredentials;
+import com.laa66.auth.domain.model.UserSettingsData;
+import com.laa66.auth.domain.model.UserSettingsNotFoundException;
 import com.laa66.auth.domain.port.out.UserRepository;
 
 /** JPA-backed {@link UserRepository}: inserts the account and its seeded settings in one tx. */
@@ -51,6 +53,12 @@ class JpaUserRepository implements UserRepository {
 
 	@Override
 	@Transactional
+	public void updatePasswordHash(UUID userId, String passwordHash) {
+		appUsers.updatePasswordHash(userId, passwordHash);
+	}
+
+	@Override
+	@Transactional
 	public UUID create(String email, String passwordHash, ContentMode defaultMode, List<String> selectedCategories) {
 		UUID userId = UUID.randomUUID();
 
@@ -68,5 +76,21 @@ class JpaUserRepository implements UserRepository {
 		userSettings.saveAndFlush(new UserSettings(
 				userId, defaultMode.name(), selectedCategories.toArray(String[]::new)));
 		return userId;
+	}
+
+	@Override
+	public Optional<UserSettingsData> findSettings(UUID userId) {
+		return userSettings.findById(userId)
+				.map(s -> new UserSettingsData(
+						ContentMode.valueOf(s.getDefaultContentMode()), List.of(s.getSelectedCategories())));
+	}
+
+	@Override
+	@Transactional
+	public void updateSettings(UUID userId, ContentMode mode, List<String> selectedCategories) {
+		int rows = userSettings.updateSettings(userId, mode.name(), selectedCategories.toArray(String[]::new));
+		if (rows == 0) {
+			throw new UserSettingsNotFoundException();
+		}
 	}
 }

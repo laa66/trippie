@@ -41,4 +41,12 @@ public interface RefreshTokenStore {
 	 * with no signal — so a retried logout behaves identically. Stale per-token entries simply expire.
 	 */
 	void deleteByToken(String rawRefreshToken);
+
+	/**
+	 * Revokes EVERY refresh-token family the user owns (password reset, flow NEW): reads the user's
+	 * family index and deletes each family pointer, then drops the index itself, so no refresh token
+	 * issued before the reset can rotate again — all sessions are forced to re-login. Idempotent: a
+	 * user with no live families is a silent no-op. Stale per-token entries simply expire.
+	 */
+	void revokeAllFamilies(UUID userId);
 }

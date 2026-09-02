@@ -102,6 +102,18 @@ class RedisRefreshTokenStore implements RefreshTokenStore {
 			return 1
 			""", Long.class);
 
+	// Password-reset revoke-all. KEYS[1]=user:{userId}; ARGV[1]=userId. Reads the family index, deletes
+	// every family pointer, then drops the index, so no token in any family can refresh again. Returns
+	// the number of families revoked. Idempotent — an empty/absent index revokes nothing.
+	private static final RedisScript<Long> REVOKE_ALL = RedisScript.of("""
+			local fams = redis.call('SMEMBERS', KEYS[1])
+			for _, familyId in ipairs(fams) do
+				redis.call('DEL', 'auth:refresh:fam:' .. ARGV[1] .. ':' .. familyId)
+			end
+			redis.call('DEL', KEYS[1])
+			return #fams
+			""", Long.class);
+
 	private final StringRedisTemplate redis;
 	private final SecureRandom random;
 
@@ -149,6 +161,11 @@ class RedisRefreshTokenStore implements RefreshTokenStore {
 	@Override
 	public void deleteByToken(String rawRefreshToken) {
 		redis.execute(DELETE_FAMILY, List.of(tokKey(sha256Hex(rawRefreshToken))));
+	}
+
+	@Override
+	public void revokeAllFamilies(UUID userId) {
+		redis.execute(REVOKE_ALL, List.of(userKey(userId)), userId.toString());
 	}
 
 	static String tokKey(String tokenHash) {
