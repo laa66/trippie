@@ -18,6 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
+import com.laa66.gateway.support.RedisTestContainer;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -86,6 +87,11 @@ class GatewaySecurityIntegrationTest {
 		registry.add("AUTH_URI", () -> backendUri);
 		registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri",
 				() -> "http://127.0.0.1:" + jwksStub.getAddress().getPort() + "/.well-known/jwks.json");
+		// The decoder now runs a denylist EXISTS on every decoded token; point it at a live (empty)
+		// Redis so valid tokens here are simply not-denylisted -> forwarded. Denylist-hit and
+		// fail-closed behaviour are proven in the dedicated M2-12 ITs.
+		registry.add("spring.data.redis.host", RedisTestContainer.REDIS::getHost);
+		registry.add("spring.data.redis.port", () -> RedisTestContainer.REDIS.getMappedPort(6379));
 	}
 
 	@AfterAll

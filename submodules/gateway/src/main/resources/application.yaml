@@ -39,6 +39,12 @@ spring:
           # Public JWK set fetched server-side and cached by the Nimbus decoder (fetch-on-unknown
           # kid + TTL, decoder defaults). NOT issuer-uri: auth has no OIDC discovery document.
           jwk-set-uri: ${AUTH_JWKS_URI:http://auth:8080/.well-known/jwks.json}
+  # Reactive Redis holding auth's jti denylist (key auth:denylist:{jti}). The gateway only does a
+  # non-blocking EXISTS per protected request; TTL is auth's concern. Compose wiring is M2-13.
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
 
 # Issuer pinned by the gateway's JwtIssuerValidator; must equal auth's auth.jwt.issuer.
 auth:
@@ -50,3 +56,9 @@ management:
     web:
       exposure:
         include: health
+  health:
+    # The gateway is designed to keep serving with Redis down (denylist fails CLOSED -> 401 on
+    # protected routes, public routes + /health unaffected), so Redis availability must not flip the
+    # container healthcheck to DOWN. Redis has its own compose healthcheck.
+    redis:
+      enabled: false

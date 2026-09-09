@@ -5,6 +5,7 @@ import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
@@ -83,15 +84,17 @@ class SecurityConfig {
 	 * Validators: timestamp with the frozen 60 s clock skew (a token is honoured until
 	 * {@code exp + 60s}) AND issuer pinned to auth's {@code auth.jwt.issuer}.
 	 *
-	 * <p>M2-12 seam: the {@code jti} denylist is a reactive (non-blocking Redis) check, so it does
-	 * NOT belong in the synchronous {@link OAuth2TokenValidator} chain below — M2-12 wraps THIS
-	 * decoder bean in a decorating {@link ReactiveJwtDecoder} that, after a successful decode, does a
-	 * reactive key-exists on the denylist and errors (fail-closed) when the {@code jti} is present.
+	 * <p>The Nimbus decoder is wrapped by {@link DenylistCheckingJwtDecoder} (M2-12): after
+	 * cryptographic validation it runs a non-blocking {@code EXISTS auth:denylist:{jti}} and rejects
+	 * revoked tokens (fail-closed on Redis errors). The {@code jti} denylist is a reactive Redis call,
+	 * so it lives in this decorating decoder rather than the synchronous {@link OAuth2TokenValidator}
+	 * chain below.
 	 */
 	@Bean
 	ReactiveJwtDecoder jwtDecoder(
 			@Value("${spring.security.oauth2.resourceserver.jwt.jwk-set-uri}") String jwkSetUri,
-			@Value("${auth.jwt.issuer}") String issuer) {
+			@Value("${auth.jwt.issuer}") String issuer,
+			ReactiveStringRedisTemplate denylistRedis) {
 		NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withJwkSetUri(jwkSetUri)
 				.jwsAlgorithm(SignatureAlgorithm.ES256)
 				.build();
@@ -101,8 +104,12 @@ class SecurityConfig {
 				// A structurally valid token with a blank/absent `sub` carries no identity — reject
 				// it at authentication (401) rather than admitting an identity-less request onto a
 				// protected route.
-				new JwtClaimValidator<String>(JwtClaimNames.SUB, StringUtils::hasText));
+				new JwtClaimValidator<String>(JwtClaimNames.SUB, StringUtils::hasText),
+				// A token with no `jti` cannot be denylisted (getId() -> null -> lookup on the literal
+				// key auth:denylist:null always misses -> unrevocable). Reject it here (401) so the
+				// denylist gate's fail-closed philosophy holds; symmetric with the `sub` gate above.
+				new JwtClaimValidator<String>(JwtClaimNames.JTI, StringUtils::hasText));
 		decoder.setJwtValidator(validator);
-		return decoder;
+		return new DenylistCheckingJwtDecoder(decoder, denylistRedis);
 	}
 }
