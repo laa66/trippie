@@ -85,7 +85,8 @@ class LoginControllerTest {
 		String csrf = cookieHeader(result, "csrf=");
 		assertThat(csrf)
 				.contains("SameSite=Strict")
-				.contains("Path=/api/auth")
+				.contains("Path=/") // origin-root so the SPA at / can read it via document.cookie
+				.doesNotContain("Path=/api/auth") // must NOT share the refresh cookie's narrow path
 				.doesNotContain("HttpOnly"); // readable so the client can echo it in X-CSRF-Token
 	}
 

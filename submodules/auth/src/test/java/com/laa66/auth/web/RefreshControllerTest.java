@@ -84,7 +84,7 @@ class RefreshControllerTest {
 				.contains("Path=/api/auth");
 
 		String csrf = cookieHeader(result, "csrf=");
-		assertThat(csrf).contains("SameSite=Strict").contains("Path=/api/auth").doesNotContain("HttpOnly");
+		assertThat(csrf).contains("SameSite=Strict").contains("Path=/").doesNotContain("Path=/api/auth").doesNotContain("HttpOnly");
 	}
 
 	@Test

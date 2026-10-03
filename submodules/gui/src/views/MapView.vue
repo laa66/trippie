@@ -3,6 +3,10 @@
     <ion-header>
       <ion-toolbar>
         <ion-title>Mapa</ion-title>
+        <ion-buttons slot="end">
+          <ion-button router-link="/settings">Ustawienia</ion-button>
+          <logout-button />
+        </ion-buttons>
         <attribution-info />
       </ion-toolbar>
     </ion-header>
@@ -29,7 +33,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonFab, IonFabButton, IonIcon } from '@ionic/vue'
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonContent, IonFab, IonFabButton, IonIcon } from '@ionic/vue'
 import { filterOutline } from 'ionicons/icons'
 import { Map as MapLibreMap, Marker } from 'maplibre-gl'
 import { useGeolocation, WROCLAW_FALLBACK } from '@/composables/useGeolocation'
@@ -38,6 +42,7 @@ import { useNearbyPoiLayer, type UseNearbyPoiLayer } from '@/composables/useNear
 import { tileStyleUrl } from '@/lib/tiles'
 import CategoryFilter from '@/components/CategoryFilter.vue'
 import AttributionInfo from '@/components/AttributionInfo.vue'
+import LogoutButton from '@/components/LogoutButton.vue'
 
 const isFilterOpen = ref(false)
 const mapEl = useTemplateRef<HTMLDivElement>('mapEl')

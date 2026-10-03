@@ -96,7 +96,8 @@ class LogoutControllerTest {
 		assertThat(csrf)
 				.contains("Max-Age=0")
 				.contains("SameSite=Strict")
-				.contains("Path=/api/auth")
+				.contains("Path=/") // clear must repeat the origin-root Path or the browser keeps the cookie
+				.doesNotContain("Path=/api/auth")
 				.doesNotContain("HttpOnly");
 	}
 
