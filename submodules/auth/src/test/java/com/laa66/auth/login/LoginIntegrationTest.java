@@ -86,6 +86,10 @@ class LoginIntegrationTest extends AbstractPostgresIntegrationTest {
 		assertThat(refreshCookie).contains("HttpOnly").contains("SameSite=Strict").contains("Path=/api/auth");
 		String rawRefresh = valueOf(refreshCookie, "refresh_token");
 
+		// The csrf cookie is readable and sits on the origin root so the SPA can echo it — it must NOT
+		// share the refresh cookie's narrow /api/auth path.
+		assertThat(cookie(result, "csrf=")).contains("Path=/").doesNotContain("Path=/api/auth").doesNotContain("HttpOnly");
+
 		// The raw token never rests in Redis — only its SHA-256 hash, under a family for this user.
 		String tokKey = "auth:refresh:tok:" + sha256Hex(rawRefresh);
 		String tokValue = redis.opsForValue().get(tokKey);

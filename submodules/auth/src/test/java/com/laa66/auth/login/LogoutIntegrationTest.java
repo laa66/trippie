@@ -117,7 +117,7 @@ class LogoutIntegrationTest extends AbstractPostgresIntegrationTest {
 				.contains("Max-Age=0").contains("HttpOnly").contains("SameSite=Strict").contains("Path=/api/auth");
 		String csrfCookie = cookie(result, "csrf=");
 		assertThat(csrfCookie)
-				.contains("Max-Age=0").contains("SameSite=Strict").contains("Path=/api/auth").doesNotContain("HttpOnly");
+				.contains("Max-Age=0").contains("SameSite=Strict").contains("Path=/").doesNotContain("Path=/api/auth").doesNotContain("HttpOnly");
 	}
 
 	@Test

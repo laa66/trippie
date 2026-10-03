@@ -9,10 +9,11 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 /**
- * Builds the auth transport cookies, scoped to {@code /api/auth} so they never ride on ordinary
- * requests. The refresh cookie is httpOnly (JS cannot read it); the csrf cookie is deliberately
- * readable so the frontend can echo it in {@code X-CSRF-Token} for the double-submit check enforced
- * on /refresh + /logout (M2-07/08). {@code Secure} is on by default and overridable for local http.
+ * Builds the auth transport cookies. The refresh cookie is httpOnly (JS cannot read it) and scoped
+ * to {@code /api/auth} so it never rides on ordinary requests. The csrf cookie is deliberately
+ * readable and scoped to {@code /} so the SPA served at origin root can echo it in
+ * {@code X-CSRF-Token} for the double-submit check enforced on /refresh + /logout (M2-07/08).
+ * {@code Secure} is on by default and overridable for local http.
  */
 @Component
 public class AuthCookies {
@@ -20,6 +21,7 @@ public class AuthCookies {
 	static final String REFRESH_COOKIE = "refresh_token";
 	static final String CSRF_COOKIE = "csrf";
 	static final String PATH = "/api/auth";
+	static final String CSRF_PATH = "/";
 	private static final Duration MAX_AGE = Duration.ofDays(30);
 	private static final int CSRF_BYTES = 32;
 
@@ -48,7 +50,7 @@ public class AuthCookies {
 				.httpOnly(false)
 				.secure(secure)
 				.sameSite("Strict")
-				.path(PATH)
+				.path(CSRF_PATH)
 				.maxAge(MAX_AGE)
 				.build();
 	}
@@ -73,7 +75,7 @@ public class AuthCookies {
 				.httpOnly(false)
 				.secure(secure)
 				.sameSite("Strict")
-				.path(PATH)
+				.path(CSRF_PATH)
 				.maxAge(0)
 				.build();
 	}

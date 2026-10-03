@@ -104,8 +104,10 @@ class RefreshIntegrationTest extends AbstractPostgresIntegrationTest {
 		// ...and the new token is indexed under the SAME family.
 		assertThat(redis.opsForValue().get("auth:refresh:tok:" + newHash))
 				.isEqualTo(session.userId + ":" + session.familyId);
-		// A fresh csrf cookie rides along with the rotation.
-		assertThat(cookie(result, "csrf=")).contains("Path=/api/auth").doesNotContain("HttpOnly");
+		// A fresh csrf cookie rides along with the rotation, on the origin-root path (readable by the SPA).
+		assertThat(cookie(result, "csrf=")).contains("Path=/").doesNotContain("Path=/api/auth").doesNotContain("HttpOnly");
+		// The rotated refresh cookie must stay on its narrow path — the two cookies must NOT share a path.
+		assertThat(cookie(result, "refresh_token=")).contains("Path=/api/auth").contains("HttpOnly");
 	}
 
 	@Test
