@@ -1,4 +1,4 @@
-.PHONY: build up down tiles load-pois
+.PHONY: build up down tiles load-pois auth-keys
 
 COMPOSE := docker compose -f infra/docker-compose.yml
 MBTILES := infra/tiles/wroclaw.mbtiles
@@ -55,3 +55,28 @@ tiles:
 # compose service's own environment.
 load-pois:
 	$(COMPOSE) run --rm spatial-loader --bbox $(WROCLAW_BBOX)
+
+# --- M2-13: dev auth signing key -----------------------------------------------
+# Generates a dev-only ES256 (EC P-256) signing key as a private JWK JSON, in the
+# exact shape auth's JwtKeyLoader requires (kty/crv/x/y/d/kid). Mounted read-only
+# into the auth container by infra/docker-compose.yml. Gitignored, never committed.
+# Generated via the auth Gradle build's `genAuthKey` task (submodules/auth/build.gradle.kts),
+# which reuses Nimbus's ECKeyGenerator — the same one JwtKeyLoaderTest uses — instead of a
+# separate language/toolchain, so no new system dependency is introduced.
+# Guarded twice: this target skips if the file already exists (cheap, avoids even starting
+# Gradle), and the generator itself refuses to overwrite (atomic CREATE_NEW) if run directly.
+AUTH_KEYS_DIR := infra/auth-keys
+AUTH_JWK      := $(AUTH_KEYS_DIR)/dev-jwk.json
+
+auth-keys:
+	@mkdir -p $(AUTH_KEYS_DIR)
+	@if [ -f "$(AUTH_JWK)" ]; then \
+		echo "$(AUTH_JWK) already exists — leaving it in place (delete it first to regenerate)."; \
+	else \
+		( cd submodules/auth && ./gradlew -q genAuthKey -Pout="$(CURDIR)/$(AUTH_JWK)" ) && \
+		chmod 644 "$(AUTH_JWK)" && \
+		echo "Generated dev ES256 signing JWK at $(AUTH_JWK)"; \
+	fi
+	# ^ chmod 644, NOT 600/640: the auth container runs as a non-root user and reads this key off
+	# a host-owned bind mount — a tighter mode would deny it read access and auth would fail to
+	# boot. Do not "fix" this to 600.

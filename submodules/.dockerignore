@@ -8,7 +8,6 @@
 **/dist-ssr
 **/.git
 gui
-auth
 content
 worker
 spatial-loader

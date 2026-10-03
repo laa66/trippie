@@ -67,3 +67,16 @@ tasks.withType<Test> {
 	// Testcontainers directly via the Flyway API, so it is unaffected by these relaxations.
 	environment("SPRING_PROFILES_ACTIVE", "test")
 }
+
+// M2-13: generates the local dev ES256 signing key (JWK JSON) for `make auth-keys`, reusing
+// Nimbus's ECKeyGenerator (the same one JwtKeyLoaderTest uses) so the output is guaranteed
+// byte-shape compatible with JwtKeyLoader. The generator class lives in test sources (nimbus is
+// already a main/runtime dependency for minting, but this CLI has no place in the runtime image);
+// running it does not compile or execute any actual tests. Never invoked at application runtime.
+tasks.register<JavaExec>("genAuthKey") {
+	group = "application"
+	description = "Generates the dev ES256 signing JWK. Usage: ./gradlew genAuthKey -Pout=<path>"
+	classpath = sourceSets.test.get().runtimeClasspath
+	mainClass.set("com.laa66.auth.tooling.GenerateDevSigningKey")
+	args = listOfNotNull(project.findProperty("out") as String?)
+}
