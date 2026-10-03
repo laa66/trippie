@@ -15,11 +15,13 @@ import jakarta.validation.Valid;
  * {@code /forgot-password} and {@code /reset-password}. Both are public (the user cannot log in), so
  * the account is identified by the email in the body, never a trusted {@code X-User-Id}.
  *
- * <p>{@code /forgot-password} always returns an empty 200 for the account-existence dimension so it
- * never enumerates accounts (an unknown email is a silent no-op; a real account over the send-cap
- * still surfaces the shared 429). {@code /reset-password} returns an empty 200 on success; every
- * failure surfaces as a ProblemDetail via {@code AuthExceptionHandler} (bad OTP → generic 400,
- * malformed field → 400).
+ * <p>{@code /forgot-password} returns ONLY an empty 200 or a shape-400 from bean validation, so it
+ * never enumerates accounts: {@link com.laa66.auth.domain.service.ForgotPasswordService} does not
+ * throw, an unknown email issues nothing, and a real account over the send-cap is a silent no-op
+ * (the throttle is keyed on a hash of the normalized email for both branches, so its state cannot be
+ * probed either). There is no 429 on this path. {@code /reset-password} returns an empty 200 on
+ * success; every failure surfaces as a ProblemDetail via {@code AuthExceptionHandler} (bad OTP
+ * → generic 400, malformed field → 400).
  */
 @RestController
 public class PasswordRecoveryController {
