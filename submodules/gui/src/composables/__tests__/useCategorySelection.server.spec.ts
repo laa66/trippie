@@ -87,7 +87,7 @@ describe('useCategorySelection (server-backed)', () => {
     sel.toggle('museums')
     await flushPromises()
 
-    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] }, expect.anything())
     expect(sel.selected.value).toEqual(['monuments'])
     expect(sel.error.value).toBeNull()
   })
@@ -99,7 +99,7 @@ describe('useCategorySelection (server-backed)', () => {
     sel.setContentMode('TEXT')
     await flushPromises()
 
-    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'] })
+    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'] }, expect.anything())
     expect(sel.defaultContentMode.value).toBe('TEXT')
   })
 
@@ -282,7 +282,7 @@ describe('useCategorySelection (server-backed)', () => {
 
     sel.toggle('museums')
     await flushPromises()
-    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['monuments'] })
+    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['monuments'] }, expect.anything())
   })
 
   it('a second refused toggle while the retry is in flight starts no additional GET', async () => {
@@ -442,5 +442,83 @@ describe('useCategorySelection (server-backed)', () => {
     pois.stop()
     pending.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
     await flushPromises()
+  })
+
+  it('a late GET of the previous session does not mark the new session hydrated (no PUT of un-hydrated state)', async () => {
+    const { sel, api, store } = await setup({ loggedIn: false })
+    const a = deferred<{ defaultContentMode: 'AUDIO'; selectedCategories: string[] }>()
+    const b = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    vi.mocked(api.getSettings).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
+    store.setAccessToken('jwt-A')
+    await flushPromises()
+    store.clearSession()
+    await flushPromises()
+    store.setAccessToken('jwt-B')
+    await flushPromises()
+
+    a.resolve({ defaultContentMode: 'AUDIO', selectedCategories: ['sacred'] })
+    await flushPromises()
+    sel.toggle('museums')
+    await flushPromises()
+
+    expect(api.putSettings).not.toHaveBeenCalled()
+    expect(sel.selected.value).toEqual(ALL)
+    expect(sel.defaultContentMode.value).toBe('BOTH')
+  })
+
+  it('a late GET of the previous session does not clear hydrating of the new session (no duplicate GET)', async () => {
+    const { sel, api, store } = await setup({ loggedIn: false })
+    const a = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const b = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    vi.mocked(api.getSettings).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
+    store.setAccessToken('jwt-A')
+    await flushPromises()
+    store.clearSession()
+    await flushPromises()
+    store.setAccessToken('jwt-B')
+    await flushPromises()
+
+    a.reject(new Error('aborted'))
+    await flushPromises()
+    sel.toggle('museums')
+    await flushPromises()
+
+    expect(api.getSettings).toHaveBeenCalledTimes(2)
+    b.resolve({ defaultContentMode: 'BOTH', selectedCategories: ALL })
+    await flushPromises()
+  })
+
+  it('a late PUT of the previous session does not clear saving of the new session (no concurrent PUTs)', async () => {
+    const { sel, api, store } = await setup({ loggedIn: true })
+    type S = { defaultContentMode: 'BOTH'; selectedCategories: string[] }
+    const a = deferred<S>()
+    const b = deferred<S>()
+    vi.mocked(api.putSettings).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
+    sel.toggle('museums')
+    store.clearSession()
+    await flushPromises()
+    store.setAccessToken('jwt-B')
+    await flushPromises()
+    sel.toggle('monuments')
+    expect(api.putSettings).toHaveBeenCalledTimes(2)
+
+    a.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    await flushPromises()
+    sel.toggle('sacred')
+    await flushPromises()
+
+    expect(api.putSettings).toHaveBeenCalledTimes(2)
+    b.resolve({ defaultContentMode: 'BOTH', selectedCategories: [] })
+    await flushPromises()
+  })
+
+  it('treats [a, a] and [a, b] as different selections (server duplicates)', async () => {
+    const { sel, api } = await setup({ loggedIn: true, server: { defaultContentMode: 'BOTH', selectedCategories: ['museums', 'museums'] } })
+    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'] })
+
+    sel.setContentMode('TEXT')
+    await flushPromises()
+
+    expect(sel.selected.value).toEqual(['museums', 'monuments'])
   })
 })

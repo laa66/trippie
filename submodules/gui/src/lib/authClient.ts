@@ -10,6 +10,26 @@ import { clearSession, getAccessToken, isLoggedOutLatched, markLoggedOut, setAcc
 const AUTH_BASE = '/api/auth'
 const CSRF_COOKIE = 'csrf'
 const CSRF_HEADER = 'X-CSRF-Token'
+// A hung leg must not keep its caller suspended: every auth fetch is bounded. 10 s where the caller is
+// waiting on the answer (the forms behind a spinner; refresh on the critical path of every retry), 5 s
+// for logout, whose on-screen outcome depends only on the local finally, not on the server's reply.
+const API_TIMEOUT_MS = 10_000
+const LOGOUT_TIMEOUT_MS = 5_000
+
+/**
+ * Runs `leg` with a signal that aborts after `timeoutMs`, clearing the timer on every exit. The signal
+ * is handed to the leg rather than a bounded fetch returned, so the response body read stays inside the
+ * window too: a body that never streams hangs the caller exactly like headers that never arrive.
+ */
+async function bounded<T>(timeoutMs: number, leg: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new DOMException('timeout', 'TimeoutError')), timeoutMs)
+  try {
+    return await leg(controller.signal)
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** Extract a non-empty access token from a 2xx auth response body, or null if the boundary lied. */
 function accessTokenOf(body: unknown): string | null {
@@ -64,17 +84,22 @@ export async function problemOf(res: Response): Promise<AuthApiError> {
   return new AuthApiError(res.status, type, detail)
 }
 
-async function postJson(path: string, body: unknown): Promise<Response> {
-  const res = await fetch(`${AUTH_BASE}${path}`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+/** @returns the parsed 2xx body, or null when there is none (the endpoints that answer with no content). */
+async function postJson(path: string, body: unknown): Promise<unknown> {
+  return bounded(API_TIMEOUT_MS, async (signal) => {
+    const res = await fetch(`${AUTH_BASE}${path}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!res.ok) {
+      throw await problemOf(res)
+    }
+    const parsed: unknown = await res.json().catch(() => null)
+    return parsed
   })
-  if (!res.ok) {
-    throw await problemOf(res)
-  }
-  return res
 }
 
 export async function register(email: string, password: string): Promise<void> {
@@ -99,8 +124,7 @@ export async function resetPassword(email: string, code: string, newPassword: st
 
 /** Public login (flow 02). Sets the refresh + csrf cookies (server-side) and stores the access token. */
 export async function login(email: string, password: string): Promise<void> {
-  const res = await postJson('/login', { email, password })
-  const token = accessTokenOf(await res.json())
+  const token = accessTokenOf(await postJson('/login', { email, password }))
   if (token === null) {
     throw new Error('Login response had no access token')
   }
@@ -117,7 +141,9 @@ function sendLogout(): Promise<Response> {
   if (csrf !== null) {
     headers[CSRF_HEADER] = csrf
   }
-  return fetch(`${AUTH_BASE}/logout`, { method: 'POST', credentials: 'same-origin', headers })
+  return bounded(LOGOUT_TIMEOUT_MS, (signal) =>
+    fetch(`${AUTH_BASE}/logout`, { method: 'POST', credentials: 'same-origin', headers, signal }),
+  )
 }
 
 /**
@@ -149,6 +175,11 @@ export async function logout(): Promise<void> {
  * another refresh (no loop). Reads the refresh token from the httpOnly cookie (sent automatically)
  * and echoes the csrf cookie in the X-CSRF-Token header for the double-submit check.
  *
+ * Bounded by {@link API_TIMEOUT_MS}: apiFetch awaits this INSIDE the await its caller is
+ * suspended on, so a hung /refresh would leave that caller's promise unsettled for the page's life
+ * (its own timeout aborts a request that already returned its 401). A timeout settles as a failure,
+ * i.e. the same path as a network error: the caller gets its original 401 back.
+ *
  * @returns true if a new access token was obtained and stored; false on any failure (session cleared).
  */
 async function doRefresh(): Promise<boolean> {
@@ -166,27 +197,30 @@ async function doRefresh(): Promise<boolean> {
   if (csrf !== null) {
     headers[CSRF_HEADER] = csrf
   }
-  try {
-    const res = await fetch(`${AUTH_BASE}/refresh`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers,
-    })
-    if (!res.ok) {
+  return bounded(API_TIMEOUT_MS, async (signal) => {
+    try {
+      const res = await fetch(`${AUTH_BASE}/refresh`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers,
+        signal,
+      })
+      if (!res.ok) {
+        return fail()
+      }
+      const token = accessTokenOf(await res.json())
+      if (token === null) {
+        return fail()
+      }
+      if (stale()) {
+        return false
+      }
+      setAccessToken(token)
+      return true
+    } catch {
       return fail()
     }
-    const token = accessTokenOf(await res.json())
-    if (token === null) {
-      return fail()
-    }
-    if (stale()) {
-      return false
-    }
-    setAccessToken(token)
-    return true
-  } catch {
-    return fail()
-  }
+  })
 }
 
 let inFlightRefresh: Promise<boolean> | null = null

@@ -35,7 +35,6 @@ describe('ForgotPasswordView', () => {
       () => vi.mocked(requestPasswordReset).mockResolvedValue(),
       () => vi.mocked(requestPasswordReset).mockRejectedValue(new AuthApiError(429, null, 'throttled')),
       () => vi.mocked(requestPasswordReset).mockRejectedValue(new AuthApiError(500, null, 'boom')),
-      () => vi.mocked(requestPasswordReset).mockRejectedValue(new TypeError('offline')),
     ]
     const rendered: string[] = []
     for (const arrange of outcomes) {
@@ -53,6 +52,22 @@ describe('ForgotPasswordView', () => {
     const wrapper = await submit('nope')
     expect(wrapper.find('[role=alert]').text()).toContain('poprawny adres')
     expect(wrapper.find('[role=status]').exists()).toBe(false)
+  })
+
+  it('a local failure that never reached the server shows a retryable error, not the success copy', async () => {
+    vi.mocked(requestPasswordReset).mockRejectedValue(new DOMException('timeout', 'TimeoutError'))
+    const wrapper = await submit()
+    expect(wrapper.find('[role=alert]').text()).toContain('Spróbuj ponownie')
+    expect(wrapper.find('[role=status]').exists()).toBe(false)
+    expect(wrapper.html()).not.toContain('Jeśli konto istnieje')
+  })
+
+  it('an offline failure shows the retryable error, not the success copy', async () => {
+    vi.mocked(requestPasswordReset).mockRejectedValue(new TypeError('offline'))
+    const wrapper = await submit()
+    expect(wrapper.find('[role=alert]').text()).toContain('Spróbuj ponownie')
+    expect(wrapper.find('[role=status]').exists()).toBe(false)
+    expect(wrapper.html()).not.toContain('Jeśli konto istnieje')
   })
 
   it('"Mam już kod" routes to /reset-password carrying only the email', async () => {

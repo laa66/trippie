@@ -91,9 +91,11 @@ let generation = 0
 // Single-flight save: one PUT at a time, plus one trailing PUT if more changes arrived meanwhile.
 let saving = false
 let dirty = false
+// One controller per session: the watcher aborts it so no request outlives the session that started it.
+let session = new AbortController()
 
 function sameSlugs(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((slug) => b.includes(slug))
+  return a.length === b.length && a.every((slug) => b.includes(slug)) && b.every((slug) => a.includes(slug))
 }
 
 function applyServer(settings: UserSettings): void {
@@ -110,7 +112,7 @@ async function hydrate(): Promise<void> {
   const mine = ++generation
   hydrating = true
   try {
-    const settings = await getSettings()
+    const settings = await getSettings(session.signal)
     if (mine === generation) {
       hydrated = true
       error.value = null
@@ -129,6 +131,8 @@ async function hydrate(): Promise<void> {
 // it after module init). Becoming false drops all server state back to the pre-auth localStorage
 // fallback — which is never written while logged in.
 watch(isAuthenticated, (authenticated) => {
+  session.abort()
+  session = new AbortController()
   generation++
   saving = false
   dirty = false
@@ -166,10 +170,10 @@ async function saveToServer(): Promise<void> {
     do {
       dirty = false
       try {
-        const stored = await putSettings({
-          defaultContentMode: defaultContentMode.value,
-          selectedCategories: [...selected.value],
-        })
+        const stored = await putSettings(
+          { defaultContentMode: defaultContentMode.value, selectedCategories: [...selected.value] },
+          session.signal,
+        )
         if (mine !== generation) return
         confirmed = stored
         // With a newer change pending, the echo is stale; the trailing PUT settles the state.

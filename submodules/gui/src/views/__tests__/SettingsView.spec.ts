@@ -32,7 +32,7 @@ describe('SettingsView', () => {
 
     toggles[1].vm.$emit('ionChange')
     await flushPromises()
-    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'] })
+    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'] }, expect.anything())
   })
 
   it('a changed content mode is PUT; an unchanged one is not', async () => {
@@ -49,7 +49,7 @@ describe('SettingsView', () => {
 
     group.vm.$emit('ionChange', { detail: { value: 'TEXT' } })
     await flushPromises()
-    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums'] })
+    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums'] }, expect.anything())
   })
 
   it('renders the revert error as text after a failed save', async () => {

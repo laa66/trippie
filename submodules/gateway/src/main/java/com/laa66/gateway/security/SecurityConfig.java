@@ -42,10 +42,27 @@ import org.springframework.util.StringUtils;
 @EnableWebFluxSecurity
 class SecurityConfig {
 
+	/**
+	 * Tokenless POSTs. {@code /refresh} and {@code /logout} are the two operations authenticated by
+	 * <em>possession of the refresh credential itself</em> (httpOnly refresh cookie + the double-submit
+	 * {@code csrf} cookie echoed in {@code X-CSRF-Token}, both asserted by the auth service), not by an
+	 * access token — so {@code /logout} is the second member of a coherent class here, not a hole in
+	 * the matrix (M2-19, route matrix revised 2026-10-03).
+	 *
+	 * <p>Why {@code /logout} must be tokenless: the boot-time logout replay has to <em>destroy</em> a
+	 * session without first <em>creating</em> one. A refresh-then-logout replay would mint a live 15-min
+	 * access token on a shared device every time a logout had failed — the exact threat M2-19 closes.
+	 *
+	 * <p>A bearer that IS present on {@code /logout} is not waved through: the auth service re-verifies
+	 * it itself ({@code AccessTokenVerifier} — signature, issuer, non-blank {@code jti}, unexpired, with
+	 * no clock skew, i.e. stricter than the gateway here) and 401s a tampered or expired one, so the
+	 * cookie-only path cannot be reached by presenting a bad token.
+	 */
 	private static final String[] PUBLIC_AUTH_POSTS = {
 			"/api/auth/register",
 			"/api/auth/login",
 			"/api/auth/refresh",
+			"/api/auth/logout",
 			"/api/auth/verify",
 			"/api/auth/resend",
 			"/api/auth/forgot-password",
@@ -64,12 +81,13 @@ class SecurityConfig {
 				.securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
 				.authorizeExchange(exchange -> exchange
 						.pathMatchers(HttpMethod.GET, "/health", "/actuator/health").permitAll()
-						// Only the specific public POSTs are tokenless — NOT all of /api/auth/**
-						// (that would expose /api/auth/logout and /api/auth/settings).
+						// Only the enumerated public POSTs are tokenless — NOT all of /api/auth/**
+						// (that would expose /api/auth/settings). The relaxation for /logout is
+						// exactly one entry.
 						.pathMatchers(HttpMethod.POST, PUBLIC_AUTH_POSTS).permitAll()
-						// Everything else (/api/auth/logout, /api/auth/settings, /api/spatial/**,
-						// and any unmapped path) requires a valid JWT. Absent/invalid/expired token
-						// on a protected route -> 401 via the resource-server entry point.
+						// Everything else (/api/auth/settings, /api/spatial/**, and any unmapped
+						// path) requires a valid JWT. Absent/invalid/expired token on a protected
+						// route -> 401 via the resource-server entry point.
 						.anyExchange().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtDecoder(jwtDecoder)))
 				// Runs after authentication so ReactiveSecurityContextHolder holds the JWT, before

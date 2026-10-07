@@ -57,4 +57,43 @@ describe('settingsApi', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'LOUD', selectedCategories: [] })))
     await expect(api.getSettings()).rejects.toThrow(/Malformed/)
   })
+
+  it('passes a signal that aborts when the caller aborts', async () => {
+    const api = await import('@/lib/settingsApi')
+    const fetchMock = vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'TEXT', selectedCategories: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const caller = new AbortController()
+
+    await api.getSettings(caller.signal)
+    await api.putSettings({ defaultContentMode: 'TEXT', selectedCategories: [] }, caller.signal)
+
+    const signals = fetchMock.mock.calls.map((c) => (c[1] as RequestInit).signal as AbortSignal)
+    expect(signals.every((s) => !s.aborted)).toBe(true)
+    caller.abort()
+    expect(signals.every((s) => s.aborted)).toBe(true)
+  })
+
+  it('aborts a request that never settles after 10 s, with or without a caller signal', async () => {
+    vi.useFakeTimers()
+    try {
+      const api = await import('@/lib/settingsApi')
+      const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_r, reject) => {
+          init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason))
+        })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const get = api.getSettings().catch((e: unknown) => e)
+      const put = api.putSettings({ defaultContentMode: 'TEXT', selectedCategories: [] }, new AbortController().signal).catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(fetchMock.mock.calls.every((c) => !(c[1] as RequestInit).signal!.aborted)).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(await get).toMatchObject({ name: 'TimeoutError' })
+      expect(await put).toMatchObject({ name: 'TimeoutError' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

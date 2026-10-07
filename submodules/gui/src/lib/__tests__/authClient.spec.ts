@@ -12,6 +12,22 @@ function jsonResponse(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response
 }
 
+/** A fetch that never answers on its own: it only rejects when its signal is aborted. */
+function hungFetch(signals: AbortSignal[]): ReturnType<typeof vi.fn> {
+  return vi.fn((_url: string, init?: RequestInit) => {
+    const signal = init?.signal ?? null
+    if (signal !== null) signals.push(signal)
+    return new Promise<Response>((_resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason))
+    })
+  })
+}
+
+/** Resolves to the promise's value if it has already settled, else to the marker — so an unsettled promise asserts. */
+function settledOr<T>(promise: Promise<T>, marker: string): Promise<T | string> {
+  return Promise.race([promise, Promise.resolve(marker)])
+}
+
 beforeEach(() => {
   vi.resetModules()
 })
@@ -350,6 +366,148 @@ describe('authClient', () => {
     expect(refreshCalls()).toBe(2)
     releases[1]()
     await newer
+  })
+
+  it('a response whose body never streams is aborted at 10 s: the timeout covers the body read, not just the headers', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = await import('@/lib/authClient')
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((_url: string, init?: RequestInit) => {
+          const signal = init!.signal!
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => new Promise((_res, rej) => signal.addEventListener('abort', () => rej(signal.reason))),
+          } as unknown as Response)
+        }),
+      )
+
+      const outcome = client.requestPasswordReset('a@b.c').then(
+        () => 'settled',
+        () => 'settled',
+      )
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(await settledOr(outcome, 'unsettled')).toBe('unsettled')
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(await settledOr(outcome, 'unsettled')).toBe('settled')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a /refresh that never answers is aborted after 10 s and settles as a failed refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      setCsrfCookie('csrf-1')
+      const store = await import('@/lib/authStore')
+      const client = await import('@/lib/authClient')
+      store.setAccessToken('stale-jwt')
+      const signals: AbortSignal[] = []
+      vi.stubGlobal('fetch', hungFetch(signals))
+
+      const pending = client.refreshAccessToken()
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(await settledOr(pending, 'unsettled')).toBe('unsettled')
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(await settledOr(pending, 'unsettled')).toBe(false)
+      expect(signals[0].aborted).toBe(true)
+      expect((signals[0].reason as DOMException).name).toBe('TimeoutError')
+      expect(store.getAccessToken()).toBeNull()
+      expect(store.useAuthStore().isAuthenticated.value).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a timed-out refresh frees the single-flight slot: the next refresh fires a new /refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = await import('@/lib/authClient')
+      const fetchMock = hungFetch([])
+      vi.stubGlobal('fetch', fetchMock)
+
+      const first = client.refreshAccessToken()
+      expect(client.refreshAccessToken()).toBe(first)
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await settledOr(first, 'unsettled')).toBe(false)
+
+      const second = client.refreshAccessToken()
+      expect(second).not.toBe(first)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await second).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a refresh that answers normally leaves no pending timeout timer behind', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = await import('@/lib/authClient')
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { accessToken: 'jwt' })))
+
+      expect(await client.refreshAccessToken()).toBe(true)
+
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a /logout that never answers is abandoned after 5 s and still drops the local session', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = await import('@/lib/authStore')
+      const client = await import('@/lib/authClient')
+      store.setAccessToken('jwt-live')
+      const signals: AbortSignal[] = []
+      vi.stubGlobal('fetch', hungFetch(signals))
+
+      const pending = client.logout()
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(await settledOr(pending, 'unsettled')).toBe('unsettled')
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(await settledOr(pending, 'unsettled')).toBeUndefined()
+      expect(signals[0].aborted).toBe(true)
+      expect(store.getAccessToken()).toBeNull()
+      expect(store.useAuthStore().isAuthenticated.value).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a form POST that never answers rejects with a TimeoutError after 10 s', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = await import('@/lib/authClient')
+      const signals: AbortSignal[] = []
+      vi.stubGlobal('fetch', hungFetch(signals))
+
+      const pending = client.login('a@b.c', 'pw').then(
+        () => 'resolved',
+        (e: unknown) => e,
+      )
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(await settledOr(pending, 'unsettled')).toBe('unsettled')
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      const outcome = await settledOr(pending, 'unsettled')
+      expect(outcome).toBeInstanceOf(DOMException)
+      expect((outcome as DOMException).name).toBe('TimeoutError')
+      expect(signals[0].aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('requestPasswordReset and resetPassword POST the documented bodies', async () => {

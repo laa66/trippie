@@ -44,8 +44,11 @@ async function submit() {
   try {
     await requestPasswordReset(email.value)
   } catch (e) {
-    // Only a 400 (malformed email) is existence-independent; every other outcome must look like success.
-    if (e instanceof AuthApiError && e.status === 400) {
+    // Existence-independent outcomes surface: a 400 (malformed email) and a local failure (timeout, offline)
+    // that never reached the server. Every other server answer must look like success.
+    if (!(e instanceof AuthApiError)) {
+      error.value = 'Nie udało się wysłać kodu. Spróbuj ponownie.'
+    } else if (e.status === 400) {
       error.value = 'Podaj poprawny adres e-mail.'
     }
   } finally {

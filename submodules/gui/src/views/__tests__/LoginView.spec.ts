@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { IonButton } from '@ionic/vue'
 import { clickButton, fillInputs } from './authViewsHelpers'
 
 const router = { push: vi.fn(), replace: vi.fn() }
@@ -48,6 +49,36 @@ describe('LoginView', () => {
     const wrapper = await submit()
     expect(router.push).not.toHaveBeenCalled()
     expect(wrapper.find('[role=alert]').exists()).toBe(true)
+  })
+
+  it('a /login the server never answers leaves the form usable again instead of spinning for the page life', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = await vi.importActual<typeof import('@/lib/authClient')>('@/lib/authClient')
+      vi.mocked(login).mockImplementationOnce(client.login)
+      // Hangs whether or not it is given a signal, so an unbounded leg really stays unsettled.
+      vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
+        })
+      })
+
+      const wrapper = mount(LoginView)
+      fillInputs(wrapper, ['user@example.com', 'secret-pw'])
+      await clickButton(wrapper, 'Zaloguj')
+      expect(wrapper.findAllComponents(IonButton)[0].props('disabled')).toBe(true)
+      expect(wrapper.find('[role=alert]').exists()).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(wrapper.findAllComponents(IonButton)[0].props('disabled')).toBe(false)
+      expect(wrapper.find('[role=alert]').exists()).toBe(true)
+      expect(wrapper.find('[role=alert]').text()).toContain('Nie udało się zalogować')
+      expect(router.replace).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
   })
 
   it('shows a validation message on a 400 (malformed email)', async () => {
