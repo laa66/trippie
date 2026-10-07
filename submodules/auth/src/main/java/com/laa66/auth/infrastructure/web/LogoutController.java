@@ -3,6 +3,8 @@ package com.laa66.auth.infrastructure.web;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -22,9 +24,23 @@ import com.laa66.auth.infrastructure.security.AccessTokenVerifier.VerifiedAccess
  * exp} can drive the denylist. On success the refresh family is revoked, the {@code jti} is denylisted
  * for its remaining life, both transport cookies are cleared ({@code Max-Age=0}, same attributes as
  * when set), and the response is 204. Idempotent — a repeat with the same still-valid token is 204.
+ *
+ * <p><b>The bearer is OPTIONAL (M2-19)</b>, so the gui's boot-time logout replay can destroy a session
+ * it has no access token for — a refresh-then-logout replay would mint a live 15-min token on a shared
+ * device every time a logout had failed, which is the threat being closed. Such a request authenticates
+ * on possession of the refresh credential alone (refresh cookie + CSRF), exactly like {@code /refresh}.
+ *
+ * <p><b>The branch keys off the bearer's PRESENCE, never its validity.</b> An {@code Authorization}
+ * header that is present but malformed, tampered, wrong-issuer or expired is rejected 401 exactly as
+ * before — it is NOT quietly downgraded to the cookie-only path, because that would let a forged token
+ * skip the {@code jti} denylist write. There is no fallback: once the header is present the verifier's
+ * outcome is final, and the only way to reach the cookie-only path is to send no header at all, which
+ * writes no denylist entry because there is no verified {@code jti} to write.
  */
 @RestController
 public class LogoutController {
+
+	private static final Logger log = LoggerFactory.getLogger(LogoutController.class);
 
 	private static final String BEARER_PREFIX = "Bearer ";
 
@@ -45,10 +61,21 @@ public class LogoutController {
 			@CookieValue(name = AuthCookies.CSRF_COOKIE, required = false) String csrfCookie,
 			@RequestHeader(name = RefreshController.CSRF_HEADER, required = false) String csrfHeader) {
 
+		// Mandatory on EVERY variant, bearer or not, and cheapest first: a failed double-submit must
+		// revoke nothing at all.
 		requireCsrf(csrfCookie, csrfHeader);
-		VerifiedAccessToken token = accessTokenVerifier.verify(bearerToken(authorization));
 
-		logout.logout(refreshToken, token.jti(), token.remainingLife());
+		if (authorization == null) {
+			// Bearer-less replay: revoke the family, write no denylist entry (no verified jti exists).
+			logout.logout(refreshToken, null, null);
+			log.info("logout: bearer-less replay accepted (cookie-only revocation), refreshCookie={}",
+					refreshToken == null || refreshToken.isBlank() ? "absent" : "present");
+		}
+		else {
+			VerifiedAccessToken token = accessTokenVerifier.verify(bearerToken(authorization));
+			logout.logout(refreshToken, token.jti(), token.remainingLife());
+			log.info("logout: accepted with a verified bearer, access token denylisted");
+		}
 
 		return ResponseEntity.noContent()
 				.header(HttpHeaders.SET_COOKIE, cookies.clearRefreshCookie().toString())
@@ -56,8 +83,12 @@ public class LogoutController {
 				.build();
 	}
 
+	/**
+	 * Only ever called with a PRESENT header (the absent case is handled by its own branch), so a header
+	 * that is not a well-formed {@code Bearer <token>} is a bad credential, not a missing one: 401.
+	 */
 	private static String bearerToken(String authorization) {
-		if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
+		if (!authorization.startsWith(BEARER_PREFIX)) {
 			throw new InvalidAccessTokenException();
 		}
 		return authorization.substring(BEARER_PREFIX.length());

@@ -7,11 +7,14 @@ import com.laa66.auth.domain.port.out.AccessTokenDenylist;
 import com.laa66.auth.domain.port.out.RefreshTokenStore;
 
 /**
- * Logout orchestration (flow 05), framework-free. Two independent revocations, both idempotent:
+ * Logout orchestration (flow 05), framework-free. Two independent revocations, both idempotent and both
+ * individually skippable — each fires only when its credential was actually presented:
  * <ol>
  * <li>revoke the refresh family behind the presented token (only when a refresh token is actually
  * present — a logout without the cookie still denylists the access token);
- * <li>denylist the access {@code jti} until its remaining life PLUS the gateway clock skew elapses.
+ * <li>denylist the access {@code jti} until its remaining life PLUS the gateway clock skew elapses
+ * (only when a {@code jti} is actually present — the bearer-less boot replay of M2-19 has no access
+ * token to deny, and must not write a denylist entry for one it cannot see).
  * </ol>
  * The web adapter has already parsed/verified the access token, so {@code jti} and the remaining life
  * are trusted inputs here; this service owns only the ordering and the idempotency.
@@ -38,6 +41,8 @@ public class LogoutService implements Logout {
 		if (rawRefreshToken != null && !rawRefreshToken.isBlank()) {
 			refreshTokenStore.deleteByToken(rawRefreshToken);
 		}
-		denylist.deny(jti, accessTokenRemainingLife.plus(denylistSkew));
+		if (jti != null && !jti.isBlank()) {
+			denylist.deny(jti, accessTokenRemainingLife.plus(denylistSkew));
+		}
 	}
 }

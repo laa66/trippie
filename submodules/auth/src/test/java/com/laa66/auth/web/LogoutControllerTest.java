@@ -3,6 +3,7 @@ package com.laa66.auth.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -35,10 +36,18 @@ import com.laa66.auth.infrastructure.web.LogoutController;
 import jakarta.servlet.http.Cookie;
 
 /**
- * Boundary slice for {@code POST /logout}: the CSRF double-submit gate (checked BEFORE anything else),
- * the bearer-token requirement, the 204 with both cleared cookies, and the uniform 401 for an
- * unusable access token. Both the use case and the token verifier are mocked — the real revocation +
- * denylist writes and the TTL≈remaining-life proof live in {@code LogoutIntegrationTest}.
+ * Boundary slice for {@code POST /logout}: the CSRF double-submit gate (checked BEFORE anything else and
+ * on every variant), the 204 with both cleared cookies, the uniform 401 for an unusable access token,
+ * and — since M2-19 — the OPTIONAL bearer. Both the use case and the token verifier are mocked; the
+ * real revocation + denylist writes and the TTL≈remaining-life proof live in
+ * {@code LogoutIntegrationTest}, and the bearer-less revocation is proven end to end in
+ * {@code BearerlessLogoutIntegrationTest}.
+ *
+ * <p>The crucial distinction pinned here is PRESENCE vs VALIDITY: no {@code Authorization} header is the
+ * replay path (204, cookie-only, no denylist write), while a header that is present but unusable is a
+ * bad credential (401, nothing revoked). Per M2-19 criterion (20) none of this is sufficient on its own
+ * — the gateway sits on the real request path, so {@code GatewaySecurityIntegrationTest} must show the
+ * tokenless call actually reaches auth.
  */
 @WebMvcTest(LogoutController.class)
 @Import({ AuthCookies.class, LogoutControllerTest.SecureRandomConfig.class })
@@ -126,15 +135,53 @@ class LogoutControllerTest {
 		verifyNoInteractions(accessTokenVerifier, logout);
 	}
 
+	/**
+	 * M2-19 criterion (18) — REWRITTEN from the former
+	 * {@code missingBearer_withValidCsrf_returns401_andNeverCallsUseCase}, which asserted the behaviour
+	 * this task deliberately reverses. The inversion is sanctioned by the 2026-10-03 ruling recorded in
+	 * PLAN.md (M2 frozen block + M2-19 criteria 16-21), NOT a unilateral loosening: criterion (2)
+	 * shields the M2-08 integration tests, and deliberately does not shield this slice.
+	 *
+	 * <p>Criterion (1): no bearer + valid CSRF -> 204, the family IS revoked, and the denylist is never
+	 * written because the use case is handed a {@code null} jti. The verifier is never reached at all —
+	 * there is nothing to verify, so the cookie-only path cannot be a disguised verification bypass.
+	 */
 	@Test
-	void missingBearer_withValidCsrf_returns401_andNeverCallsUseCase() throws Exception {
-		// CSRF passes, so this proves the SEPARATE absent-token gate: 401, and the verifier is never
-		// even reached (the missing Authorization header is rejected in the controller).
+	void missingBearer_withValidCsrf_returns204_revokesFamily_andNeverDenylists() throws Exception {
 		mvc.perform(post("/logout")
 				.cookie(new Cookie("refresh_token", "raw-refresh"))
 				.cookie(new Cookie("csrf", CSRF))
 				.header("X-CSRF-Token", CSRF))
-				.andExpect(status().isUnauthorized());
+				.andExpect(status().isNoContent());
+
+		// The family is revoked; the null jti is what suppresses the denylist write downstream.
+		verify(logout).logout(eq("raw-refresh"), isNull(), isNull());
+		verifyNoInteractions(accessTokenVerifier);
+	}
+
+	/** Criterion (3): neither bearer nor refresh cookie — still 204, still nothing to verify. */
+	@Test
+	void neitherBearerNorRefreshCookie_returns204_idempotently() throws Exception {
+		mvc.perform(post("/logout")
+				.cookie(new Cookie("csrf", CSRF))
+				.header("X-CSRF-Token", CSRF))
+				.andExpect(status().isNoContent());
+
+		verify(logout).logout(isNull(), isNull(), isNull());
+		verifyNoInteractions(accessTokenVerifier);
+	}
+
+	/**
+	 * Criterion (4): CSRF is mandatory on the bearer-LESS variant too. Without this the replay path
+	 * would be an unauthenticated, cross-site-triggerable revocation endpoint.
+	 */
+	@Test
+	void missingBearer_withoutCsrf_returns403_andRevokesNothing() throws Exception {
+		mvc.perform(post("/logout")
+				.cookie(new Cookie("refresh_token", "raw-refresh"))
+				.cookie(new Cookie("csrf", CSRF)))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.type").value("urn:trippie:auth:csrf"));
 
 		verifyNoInteractions(accessTokenVerifier, logout);
 	}
@@ -145,6 +192,48 @@ class LogoutControllerTest {
 
 		mvc.perform(post("/logout")
 				.header(HttpHeaders.AUTHORIZATION, BEARER)
+				.cookie(new Cookie("refresh_token", "raw-refresh"))
+				.cookie(new Cookie("csrf", CSRF))
+				.header("X-CSRF-Token", CSRF))
+				.andExpect(status().isUnauthorized());
+
+		verifyNoInteractions(logout);
+	}
+
+	/**
+	 * Criterion (5), the load-bearing one: a bearer that is PRESENT but unusable must NOT be silently
+	 * downgraded to the cookie-only path. If it were, a forged/expired token would buy a 204 while
+	 * skipping the {@code jti} denylist write — so the attacker's still-live access token would keep
+	 * working at the gateway. 401 and NO revocation at all is the only acceptable answer.
+	 *
+	 * <p>Mutation that must turn this red: changing the controller's branch from "header absent" to
+	 * "no usable token" (e.g. catching {@link InvalidAccessTokenException} and falling through to the
+	 * cookie-only call) — then this returns 204 and {@code logout} is invoked.
+	 */
+	@Test
+	void presentButExpiredBearer_returns401_andIsNotDowngradedToTheCookieOnlyPath() throws Exception {
+		when(accessTokenVerifier.verify("header.payload.sig")).thenThrow(new InvalidAccessTokenException());
+
+		mvc.perform(post("/logout")
+				.header(HttpHeaders.AUTHORIZATION, BEARER)
+				.cookie(new Cookie("refresh_token", "raw-refresh"))
+				.cookie(new Cookie("csrf", CSRF))
+				.header("X-CSRF-Token", CSRF))
+				.andExpect(status().isUnauthorized());
+
+		// Not merely "no denylist write" — the family is not revoked either, so a bad token buys nothing.
+		verifyNoInteractions(logout);
+	}
+
+	/**
+	 * Criterion (5) again, for a header that is present but not a Bearer at all. "Present and
+	 * unparseable" is a bad credential, not a missing one, so it must 401 rather than fall through to
+	 * the bearer-less branch.
+	 */
+	@Test
+	void presentNonBearerAuthorizationHeader_returns401_andNeverReachesTheCookieOnlyPath() throws Exception {
+		mvc.perform(post("/logout")
+				.header(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNz")
 				.cookie(new Cookie("refresh_token", "raw-refresh"))
 				.cookie(new Cookie("csrf", CSRF))
 				.header("X-CSRF-Token", CSRF))
