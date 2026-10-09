@@ -1,4 +1,4 @@
-.PHONY: build up down tiles load-pois auth-keys
+.PHONY: build up down tiles load-pois auth-keys unit-test int-test test
 
 COMPOSE := docker compose -f infra/docker-compose.yml
 MBTILES := infra/tiles/wroclaw.mbtiles
@@ -80,3 +80,28 @@ auth-keys:
 	# ^ chmod 644, NOT 600/640: the auth container runs as a non-root user and reads this key off
 	# a host-owned bind mount — a tighter mode would deny it read access and auth would fail to
 	# boot. Do not "fix" this to 600.
+
+# --- Tests ---------------------------------------------------------------------
+# Split by naming convention, not by Docker detection: int-test runs every *IntegrationTest /
+# *IntTest class (Java) and the container-backed Go package, so it needs a running Docker
+# daemon, and it includes a few ITs that happen to work without one. unit-test runs everything
+# else (Java *Test, Go -short, gui vitest). test runs both, in order. E2E stays manual
+# (docker compose up). Test caching is bypassed for int-test (Gradle upToDateWhen, go -count=1).
+.NOTPARALLEL:
+
+unit-test:
+	( cd submodules/commons && ./gradlew unitTest )
+	( cd submodules/spatial && ./gradlew unitTest )
+	( cd submodules/gateway && ./gradlew unitTest )
+	( cd submodules/auth && ./gradlew unitTest )
+	( cd submodules/spatial-loader && go test -short ./... )
+	( cd submodules/gui && npm test )
+
+int-test:
+	( cd submodules/commons && ./gradlew integrationTest )
+	( cd submodules/spatial && ./gradlew integrationTest )
+	( cd submodules/gateway && ./gradlew integrationTest )
+	( cd submodules/auth && ./gradlew integrationTest )
+	( cd submodules/spatial-loader && go test -count=1 ./internal/loader/... )
+
+test: unit-test int-test

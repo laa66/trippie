@@ -1,4 +1,6 @@
 import { clearSession, getAccessToken, isLoggedOutLatched, markLoggedOut, setAccessToken } from '@/lib/authStore'
+import { bounded } from '@/lib/bounded'
+import { clearPendingLogout, hasPendingLogout, markPendingLogout } from '@/lib/pendingLogout'
 
 /**
  * Auth API client (flows 02 + 04). All calls are origin-relative so the gui nginx reverse-proxies
@@ -15,21 +17,6 @@ const CSRF_HEADER = 'X-CSRF-Token'
 // for logout, whose on-screen outcome depends only on the local finally, not on the server's reply.
 const API_TIMEOUT_MS = 10_000
 const LOGOUT_TIMEOUT_MS = 5_000
-
-/**
- * Runs `leg` with a signal that aborts after `timeoutMs`, clearing the timer on every exit. The signal
- * is handed to the leg rather than a bounded fetch returned, so the response body read stays inside the
- * window too: a body that never streams hangs the caller exactly like headers that never arrive.
- */
-async function bounded<T>(timeoutMs: number, leg: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(new DOMException('timeout', 'TimeoutError')), timeoutMs)
-  try {
-    return await leg(controller.signal)
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 /** Extract a non-empty access token from a 2xx auth response body, or null if the boundary lied. */
 function accessTokenOf(body: unknown): string | null {
@@ -52,6 +39,38 @@ function accessTokenOf(body: unknown): string | null {
 export function readCsrfToken(): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]*)`))
   return match ? decodeURIComponent(match[1]) : null
+}
+
+/**
+ * Drops the `csrf` cookie after a logout the server did not confirm (M2-19 criterion 6). It defends
+ * only against an unwitting NEXT user of the device: the double-submit token is stateless and
+ * client-forgeable by design (auth stores nothing, it only compares header to cookie), so this is
+ * never a defence against devtools on that same device.
+ *
+ * Path must repeat the one auth set it with (`/`), or the browser drops nothing.
+ */
+function deleteCsrfCookie(): void {
+  document.cookie = `${CSRF_COOKIE}=; Path=/; Max-Age=0`
+}
+
+/**
+ * Mints a fresh random `csrf` cookie and returns its value, for the boot-time logout replay to echo
+ * (M2-19 criterion 7). Legitimate precisely because the double-submit check is stateless: auth
+ * asserts header == cookie and nothing more, so a self-minted pair is as valid as a server-minted
+ * one.
+ *
+ * `Secure` tracks the scheme instead of being hardcoded either way, mirroring auth's own
+ * `auth.cookies.secure` knob (default true, flipped to false only for the local http stack): on http
+ * a `Secure` cookie would be dropped and the replay would 403, while on https a cookie minted
+ * WITHOUT `Secure` would overwrite the server's `Secure` one with a weaker variant.
+ */
+function mintCsrfCookie(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  const value = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  const secure = location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${CSRF_COOKIE}=${value}; Path=/; SameSite=Strict${secure}`
+  return value
 }
 
 /** Stable ProblemDetail `type` the auth service returns on login for a correct-password, unverified account. */
@@ -97,8 +116,17 @@ async function postJson(path: string, body: unknown): Promise<unknown> {
     if (!res.ok) {
       throw await problemOf(res)
     }
-    const parsed: unknown = await res.json().catch(() => null)
-    return parsed
+    // An ABORTED body read is not "2xx with no body": the signal in scope is the discriminator, so
+    // the abort propagates and the caller sees a failure instead of a bogus success on a leg that
+    // was cut off mid-stream. A genuinely empty or non-JSON body still resolves to null.
+    try {
+      return (await res.json()) as unknown
+    } catch (e) {
+      if (signal.aborted) {
+        throw e
+      }
+      return null
+    }
   })
 }
 
@@ -129,6 +157,9 @@ export async function login(email: string, password: string): Promise<void> {
     throw new Error('Login response had no access token')
   }
   setAccessToken(token)
+  // A fresh session supersedes an unconfirmed old one (M2-19 criterion 11): without this a sticky
+  // marker would deny every boot refresh after a re-login, i.e. a lockout.
+  clearPendingLogout()
 }
 
 function sendLogout(): Promise<Response> {
@@ -152,21 +183,79 @@ function sendLogout(): Promise<Response> {
  * access token 401s at the gateway before the logout is processed, so on a 401 refresh once and
  * resend — otherwise the server-side session would survive. The local session is cleared whatever
  * the server answers, and the latch/epoch stop any straggling refresh from resurrecting it.
+ *
+ * <p>M2-19 criterion 6: any outcome that is not a 204 — a timeout, a thrown network error, a 4xx, a
+ * 5xx — leaves the pending-logout marker behind, because a server answer other than 204 is no
+ * evidence that the refresh family was revoked. The condition is deliberately BROADER than
+ * ForgotPasswordView's local-failure branch and the two must NOT be unified: there a leg that never
+ * reached the server is singled out because it REVEALS nothing about account existence; here a 5xx
+ * is as dangerous as a timeout because it CONCEALS whether the session died.
  */
 export async function logout(): Promise<void> {
   try {
-    const res = await sendLogout()
+    let res = await sendLogout()
     if (res.status === 401 && (await refreshAccessToken())) {
-      await sendLogout()
+      res = await sendLogout()
+    }
+    if (res.status !== 204) {
+      recordUnconfirmedLogout()
     }
   } catch {
-    // network failure: the local session is still dropped below
+    // timeout or network failure: nothing was confirmed revoked, so the replay must happen
+    recordUnconfirmedLogout()
   } finally {
     epoch++
     inFlightRefresh = null
     sessionResolved = Promise.resolve(false)
     markLoggedOut()
     clearSession()
+  }
+}
+
+function recordUnconfirmedLogout(): void {
+  markPendingLogout()
+  deleteCsrfCookie()
+}
+
+/**
+ * Boot-time logout replay (M2-19 criteria 7 + 8). With the marker set this is the ONLY auth call the
+ * boot makes — no `/refresh` whatsoever, because refreshing first would mint a live 15-minute access
+ * token on what may be a shared device every time a logout had failed, i.e. the exact threat being
+ * closed. The replay carries no `Authorization` header: it must be able to DESTROY a session it never
+ * created, which is why auth accepts `/logout` on the refresh cookie + CSRF alone.
+ *
+ * Deliberately NOT routed through {@link postJson} (M2-19 criterion 8): the decision is read off
+ * `res.status === 204` and nothing else — never off "the promise resolved" — and no body is read at
+ * all, so no body-parsing policy can ever reinterpret a cut-off leg as a confirmed revocation.
+ *
+ * Any other outcome keeps the marker, so a repeatedly failing server never silently resurrects the
+ * session. A sticky marker is the CORRECT end state, not a defect: it keeps the app logged out, and
+ * {@link login} clears it, so there is no lockout.
+ */
+export async function resumePendingLogout(): Promise<void> {
+  if (!hasPendingLogout()) {
+    return
+  }
+  const csrf = mintCsrfCookie()
+  try {
+    const res = await bounded(LOGOUT_TIMEOUT_MS, (signal) =>
+      fetch(`${AUTH_BASE}/logout`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { [CSRF_HEADER]: csrf },
+        signal,
+      }),
+    )
+    if (res.status === 204) {
+      clearPendingLogout()
+    }
+  } catch {
+    // marker stays: the app remains logged out and the next boot retries
+  } finally {
+    // Unconditional: a failed replay must not leave the cookie this function minted sitting in the
+    // jar, since recordUnconfirmedLogout() deleted the server's one on purpose. The next boot mints
+    // a fresh one anyway.
+    deleteCsrfCookie()
   }
 }
 
@@ -234,7 +323,13 @@ let epoch = 0
  * fresh — the guarantee is about concurrency, not lifetime.
  */
 export function refreshAccessToken(): Promise<boolean> {
-  if (isLoggedOutLatched()) {
+  // The choke point for BOTH logged-out signals, and the only place that is on the path of every
+  // refresh (M2-19 HIGH-1). The in-memory latch dies with the reload; the pending-logout marker is
+  // what survives it, and checking it only in ensureSessionResolved left a hole: an apiFetch 401
+  // arriving before the nav guard had run would refresh and put a live token back in memory on a
+  // device whose user believes they signed out. Without a marker this is a storage read and nothing
+  // else — the no-marker path stays byte-identical (criterion 9).
+  if (isLoggedOutLatched() || hasPendingLogout()) {
     return Promise.resolve(false)
   }
   if (inFlightRefresh !== null) {
@@ -253,8 +348,24 @@ export function refreshAccessToken(): Promise<boolean> {
  * Memoized, once-only boot refresh: the first call starts it, every later call (the nav guard on
  * each navigation; also started once at app boot) gets the same settled promise — unlike refreshAccessToken, which would fire a
  * fresh /refresh whenever nothing is in flight.
+ *
+ * With a pending-logout marker it resolves `false` IMMEDIATELY (M2-19 criterion 10) and issues no
+ * request at all: the nav guard awaits this, and it must not stall behind the up-to-5 s replay that
+ * {@link resumePendingLogout} is running in the background. With no marker the behaviour is
+ * unchanged — one memoized `/refresh` (criterion 9).
  */
 export function ensureSessionResolved(): Promise<boolean> {
+  if (hasPendingLogout()) {
+    // Both halves of "logged out", symmetrically: the latch refuses future refreshes, clearSession
+    // drops a token that may already be in memory. The second matters for a tab that was alive when
+    // another tab's logout failed — localStorage is shared, this tab's in-memory token is not, and
+    // without it that tab would sail through the nav guard and carry the token for up to 15 min. On
+    // a cold boot it is a no-op.
+    markLoggedOut()
+    clearSession()
+    sessionResolved ??= Promise.resolve(false)
+    return sessionResolved
+  }
   sessionResolved ??= refreshAccessToken()
   return sessionResolved
 }

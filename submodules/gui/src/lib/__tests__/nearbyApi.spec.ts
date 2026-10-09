@@ -21,6 +21,7 @@ function okFetch(body: unknown = BODY) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('fetchNearby', () => {
@@ -70,10 +71,72 @@ describe('fetchNearby', () => {
     expect(res).toEqual(BODY)
   })
 
-  it('throws (including the status) on a non-2xx response', async () => {
+  it('throws with the status machine-readable on a non-2xx response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({}) }))
-    await expect(
-      fetchNearby({ lat: 999, lon: 17, radius: 500, categories: ['attractions'] }),
-    ).rejects.toThrow(/400/)
+    await expect(fetchNearby({ lat: 999, lon: 17, radius: 500, categories: ['attractions'] })).rejects.toMatchObject({
+      status: 400,
+    })
+  })
+
+  // Accepted widening: nearby was wholly unbounded until the per-attempt budget moved into apiFetch.
+  // The reason must be a TimeoutError, not an AbortError -- useNearbyPois silently drops the latter.
+  it('is bounded at 10 s through apiFetchJson, rejecting with a TimeoutError', async () => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: unknown, init?: RequestInit) => {
+        const signal = init!.signal!
+        signals.push(signal)
+        return new Promise<Response>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)))
+      }),
+    )
+
+    const outcome = fetchNearby({ lat: 51, lon: 17, radius: 500, categories: ['museums'] }).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(signals[0].aborted).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(await outcome).toMatchObject({ name: 'TimeoutError' })
+  })
+
+  // Regression: a 200 whose BODY never streams used to be unbounded, because the budget ended when
+  // the Response was handed back and the caller read the body outside the window.
+  it('bounds the body read too: a 200 whose body never streams rejects with a TimeoutError at 10 s', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: unknown, init?: RequestInit) => {
+        const signal = init!.signal!
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => new Promise((_res, rej) => signal.addEventListener('abort', () => rej(signal.reason))),
+        } as unknown as Response)
+      }),
+    )
+
+    const outcome = fetchNearby({ lat: 51, lon: 17, radius: 500, categories: ['museums'] }).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(await outcome).toMatchObject({ name: 'TimeoutError' })
+  })
+
+  // The boundary check useNearbyPois depends on: it assigns res.items/res.truncated straight into
+  // refs, so `{}` would land `undefined` in them and `null` would throw a TypeError into its catch.
+  it('rejects a malformed 200 body before it reaches the composables', async () => {
+    const malformed: unknown[] = [
+      null,
+      {},
+      { items: [], truncated: 'no' },
+      { items: 'nope', truncated: false },
+      { items: [{ id: 1, category: 'museums', name: null, lat: 51, lon: 17, distanceMeters: 4 }], truncated: false },
+      { items: [{ id: 'a', category: 'museums', name: null, lat: '51', lon: 17, distanceMeters: 4 }], truncated: false },
+    ]
+    for (const body of malformed) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body }))
+      await expect(fetchNearby({ lat: 51, lon: 17, radius: 500, categories: ['museums'] })).rejects.toThrow(/Malformed/)
+    }
   })
 })

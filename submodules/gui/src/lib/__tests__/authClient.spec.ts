@@ -23,6 +23,18 @@ function hungFetch(signals: AbortSignal[]): ReturnType<typeof vi.fn> {
   })
 }
 
+/** A fetch whose headers arrive but whose body never streams: json() settles only when aborted. */
+function hungBodyFetch(): ReturnType<typeof vi.fn> {
+  return vi.fn((_url: string, init?: RequestInit) => {
+    const signal = init!.signal!
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_res, rej) => signal.addEventListener('abort', () => rej(signal.reason))),
+    } as unknown as Response)
+  })
+}
+
 /** Resolves to the promise's value if it has already settled, else to the marker — so an unsettled promise asserts. */
 function settledOr<T>(promise: Promise<T>, marker: string): Promise<T | string> {
   return Promise.race([promise, Promise.resolve(marker)])
@@ -372,17 +384,7 @@ describe('authClient', () => {
     vi.useFakeTimers()
     try {
       const client = await import('@/lib/authClient')
-      vi.stubGlobal(
-        'fetch',
-        vi.fn((_url: string, init?: RequestInit) => {
-          const signal = init!.signal!
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => new Promise((_res, rej) => signal.addEventListener('abort', () => rej(signal.reason))),
-          } as unknown as Response)
-        }),
-      )
+      vi.stubGlobal('fetch', hungBodyFetch())
 
       const outcome = client.requestPasswordReset('a@b.c').then(
         () => 'settled',
@@ -531,5 +533,41 @@ describe('authClient', () => {
       status: 400,
       detail: 'bad code',
     })
+  })
+
+  // The two halves of the postJson body-read discrimination: an abort is a failure, an empty body
+  // is not. Without the signal check both collapse into the same bogus "empty 2xx".
+  it('a 2xx whose body read is aborted REJECTS, instead of passing as a bodyless success', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = await import('@/lib/authClient')
+      vi.stubGlobal('fetch', hungBodyFetch())
+
+      const outcome = client.requestPasswordReset('a@b.c').then(
+        () => 'resolved',
+        (e: unknown) => e,
+      )
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      const settled = await outcome
+      expect(settled).toBeInstanceOf(DOMException)
+      expect((settled as DOMException).name).toBe('TimeoutError')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a 2xx with an empty, non-JSON body still resolves as a bodyless success', async () => {
+    const client = await import('@/lib/authClient')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+      } as unknown as Response),
+    )
+
+    await expect(client.register('a@b.c', 'pw12345678')).resolves.toBeUndefined()
   })
 })

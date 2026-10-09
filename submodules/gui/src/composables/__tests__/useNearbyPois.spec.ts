@@ -65,6 +65,13 @@ function createFakeMap(opts: {
   }
 }
 
+/** A rejection shaped like a browser abort reason: an Error subclass carrying the DOMException name. */
+function abortLike(name: string, message: string): Error {
+  const err = new Error(message)
+  err.name = name
+  return err
+}
+
 async function bootstrap(opts: {
   selection?: string[]
   zoom?: number
@@ -278,5 +285,41 @@ describe('useNearbyPois', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1) // no extra request
     expect(api.items.value).toEqual([])
     expect(api.truncated.value).toBe(false)
+  })
+
+  // Guards abortLike()'s premise. The day jsdom makes DOMException an Error, this goes red and the
+  // workaround gets re-checked instead of quietly becoming unnecessary -- or wrong.
+  it('jsdom DOMException is not an Error, which is why abortLike models the browser shape instead', () => {
+    expect(new DOMException('x', 'AbortError') instanceof Error).toBe(false)
+  })
+
+  // A bounded nearby fetch (the per-attempt budget now lives in apiFetch) makes a TIMEOUT reachable
+  // here for the first time. It must not fall into the abort guard, which exists for a query the
+  // composable itself superseded: that one is silent on purpose, a timeout has to be visible.
+  //
+  // The rejection is modelled as an Error carrying the DOMException's name, NOT as a DOMException:
+  // jsdom's DOMException is not `instanceof Error` (a real browser's is), so a literal
+  // `new DOMException(...)` would make isAbortError() answer false for BOTH names and the assertions
+  // would hold no matter what the guard said.
+  it('stays silent on a query it cancelled itself but surfaces a timed-out one', async () => {
+    const { api, mockFetch } = await bootstrap({ zoom: 14 })
+    api.refresh()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.items.value).toEqual(RESPONSE.items)
+    expect(api.error.value).toBeNull()
+
+    mockFetch.mockRejectedValueOnce(abortLike('AbortError', 'superseded'))
+    api.refresh()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(api.error.value).toBeNull()
+
+    mockFetch.mockRejectedValueOnce(abortLike('TimeoutError', 'timeout'))
+    api.refresh()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(api.error.value).toBe('Nie udało się pobrać punktów w pobliżu.')
+    expect(api.items.value).toEqual(RESPONSE.items) // last results kept, no flicker
+    expect(api.loading.value).toBe(false)
   })
 })

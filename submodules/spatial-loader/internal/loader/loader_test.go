@@ -2,6 +2,7 @@ package loader
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"testing"
@@ -23,6 +24,10 @@ const migrationPath = "../../../spatial/src/main/resources/db/migration/V1__loca
 var testPool *pgxpool.Pool
 
 func TestMain(m *testing.M) {
+	flag.Parse() // testing.Short() is only valid after flag parsing
+	if testing.Short() {
+		os.Exit(m.Run()) // container-backed tests skip themselves via reset
+	}
 	ctx := context.Background()
 
 	ctr, err := postgres.Run(ctx, "postgis/postgis:18-3.6-alpine",
@@ -84,6 +89,9 @@ func loadFixture(t *testing.T) []overpass.Element {
 
 func reset(t *testing.T, ctx context.Context) {
 	t.Helper()
+	if testPool == nil {
+		t.Skip("needs a Docker daemon (Testcontainers); run without -short")
+	}
 	if _, err := testPool.Exec(ctx, "TRUNCATE location_point"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

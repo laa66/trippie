@@ -6,6 +6,10 @@
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
+      <p v-if="logoutUnconfirmed" class="text-warning" role="status">
+        Poprzednie wylogowanie nie zostało potwierdzone przez serwer — sesja może być nadal aktywna.
+        Dokończymy wylogowanie automatycznie.
+      </p>
       <ion-item>
         <ion-input
           type="email"
@@ -39,12 +43,16 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonItem, IonInput, IonButton } from '@ionic/vue'
 import { AuthApiError, EMAIL_NOT_VERIFIED_TYPE, login } from '@/lib/authClient'
+import { hasPendingLogout } from '@/lib/pendingLogout'
 
 const router = useRouter()
 const email = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
+// M2-19 criterion 14: a non-blocking notice, read once on mount. Nothing here gates the form — the
+// sign-out is being completed in the background by the boot replay.
+const logoutUnconfirmed = hasPendingLogout()
 
 async function submit() {
   error.value = ''

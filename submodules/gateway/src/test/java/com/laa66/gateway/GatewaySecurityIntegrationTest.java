@@ -139,6 +139,24 @@ class GatewaySecurityIntegrationTest {
 				.expectBody().jsonPath("$.path").isEqualTo("/register");
 	}
 
+	/**
+	 * M2-19 criteria (17) + (20). This test is the INVERSION of the former
+	 * {@code protectedAuthLogout_noToken_isUnauthorized}, sanctioned by the M2-19 ruling (PLAN.md,
+	 * M2 frozen decisions, route-matrix revision 2026-10-03) — it is an authorised relaxation, not a
+	 * unilaterally loosened security test. {@code /api/auth/logout} joins {@code /refresh} as the
+	 * second route authenticated by possession of the refresh credential itself (httpOnly cookie +
+	 * double-submit CSRF, both checked by auth), so the gui's boot-time logout replay can destroy a
+	 * session it holds no access token for. Criterion (20): auth's own MockMvc cannot prove this —
+	 * with the route still protected the replay would 401 at {@code anyExchange().authenticated()}
+	 * and revoke nothing, while auth's direct-to-service ITs stayed green.
+	 */
+	@Test
+	void publicAuthLogout_tokenless_reachesBackend() {
+		client.post().uri("/api/auth/logout").exchange()
+				.expectStatus().isOk()
+				.expectBody().jsonPath("$.path").isEqualTo("/logout");
+	}
+
 	// ---- protected routes reject bad/absent tokens -------------------------
 
 	@Test
@@ -150,12 +168,6 @@ class GatewaySecurityIntegrationTest {
 	@Test
 	void protectedSettings_noToken_isUnauthorized() {
 		client.get().uri("/api/auth/settings").exchange()
-				.expectStatus().isUnauthorized();
-	}
-
-	@Test
-	void protectedAuthLogout_noToken_isUnauthorized() {
-		client.post().uri("/api/auth/logout").exchange()
 				.expectStatus().isUnauthorized();
 	}
 
@@ -297,6 +309,23 @@ class GatewaySecurityIntegrationTest {
 	@Test
 	void publicRoute_stripsSpoofedUserId() {
 		client.post().uri("/api/auth/login")
+				.header("X-User-Id", "attacker")
+				.exchange()
+				.expectStatus().isOk()
+				.expectBody().jsonPath("$.userId").isEqualTo("");
+	}
+
+	/**
+	 * M2-19 criterion (19). Pins the exact property the logout relaxation's safety argument rests on:
+	 * {@code UserIdHeaderFilter} is registered {@code addFilterAfter(..., AUTHORIZATION)} and strips
+	 * the client header UNCONDITIONALLY, so it still runs on a permitAll exchange and a tokenless
+	 * {@code /logout} reaches auth with no identity at all. Without this test the relaxation could
+	 * silently become an identity-spoofing hole if the filter were ever moved behind the authenticated
+	 * branch — nothing else in the suite covers a permitAll POST that is also a mutating operation.
+	 */
+	@Test
+	void publicAuthLogout_tokenless_stripsSpoofedUserId() {
+		client.post().uri("/api/auth/logout")
 				.header("X-User-Id", "attacker")
 				.exchange()
 				.expectStatus().isOk()

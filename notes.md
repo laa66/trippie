@@ -1,1 +1,1 @@
-add skeletons or similar nice effect while loading data, zmiana tych 'zamknij' w dialogach
+add skeletons or similar nice effect while loading data, zmiana tych 'zamknij' w dialogach, czyli np. po wejsciu na aplikacje zanim pokaze twoja lokalizacje to powinno sie ladowac zamiast pokazywac mape z jakas zla pozycja na srodku wroclawia.

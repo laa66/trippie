@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { IonButton } from '@ionic/vue'
 import { clickButton, fillInputs } from './authViewsHelpers'
@@ -85,5 +85,35 @@ describe('LoginView', () => {
     vi.mocked(login).mockRejectedValue(new AuthApiError(400, null, null))
     const wrapper = await submit()
     expect(wrapper.find('[role=alert]').text()).toContain('poprawny adres')
+  })
+
+  // M2-19 criterion 14: a non-blocking notice when the previous logout got no 204.
+  describe('unconfirmed-logout notice', () => {
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('is absent on an ordinary visit, and the form still works', async () => {
+      vi.mocked(login).mockResolvedValue()
+      const wrapper = await submit()
+      expect(wrapper.find('[role=status]').exists()).toBe(false)
+      expect(router.replace).toHaveBeenCalledWith('/map')
+    })
+
+    it('is shown with a pending-logout marker and blocks nothing', async () => {
+      vi.stubGlobal('localStorage', {
+        getItem: (k: string) => (k === 'trippie.pendingLogout' ? '1759000000000' : null),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+      })
+      vi.mocked(login).mockResolvedValue()
+
+      const wrapper = await submit()
+
+      const notice = wrapper.find('[role=status]')
+      expect(notice.exists()).toBe(true)
+      expect(notice.text()).toContain('nie zostało potwierdzone')
+      // non-blocking: the login still went through
+      expect(login).toHaveBeenCalledWith('user@example.com', 'secret-pw')
+      expect(router.replace).toHaveBeenCalledWith('/map')
+    })
   })
 })

@@ -241,4 +241,32 @@ class LogoutControllerTest {
 
 		verifyNoInteractions(logout);
 	}
+
+	/**
+	 * LOW-3 (Light, M2-19 review). The branch keys off {@code authorization == null}, so a header that
+	 * is PRESENT but blank falls to {@code bearerToken()} and 401s rather than being treated as absent
+	 * and downgraded to the cookie-only replay path. That is the safer of the two readings and it is
+	 * the decision recorded here, because widening the condition to {@code || isBlank()} is a mutation
+	 * that otherwise survives the whole suite. It is reachable in production: an empty
+	 * {@code Authorization} header passes the gateway and arrives at auth (measured), so the choice
+	 * has to be made on this side.
+	 *
+	 * <p>Treating blank-as-absent would also be a real, if narrow, downgrade: it would let a caller
+	 * pick the no-denylist-write path by sending an empty header instead of no header, i.e. let
+	 * client-controlled input choose the branch — the same objection that got "admit /logout only when
+	 * no Authorization header is present" rejected at the gateway.
+	 */
+	@Test
+	void blankAuthorizationHeader_returns401_andIsNotTreatedAsAbsent() throws Exception {
+		for (String blank : List.of("", " ")) {
+			mvc.perform(post("/logout")
+					.header(HttpHeaders.AUTHORIZATION, blank)
+					.cookie(new Cookie("refresh_token", "raw-refresh"))
+					.cookie(new Cookie("csrf", CSRF))
+					.header("X-CSRF-Token", CSRF))
+					.andExpect(status().isUnauthorized());
+		}
+
+		verifyNoInteractions(logout);
+	}
 }
