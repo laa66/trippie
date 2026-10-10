@@ -1,40 +1,61 @@
 <template>
-  <ion-page>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Mapa</ion-title>
-        <ion-buttons slot="end">
-          <ion-button router-link="/settings">Ustawienia</ion-button>
-          <logout-button />
-        </ion-buttons>
+  <q-layout view="hHh lpR fFf">
+    <q-header>
+      <q-toolbar>
+        <q-toolbar-title>Mapa</q-toolbar-title>
+        <q-space />
+        <!-- text-white only until M2.5-05 (N4): a QBtn with `to` renders an <a>, and Ionic's
+             unlayered `a { color: var(--ion-color-primary) }` paints it #3880ff on a #3880ff
+             header — invisible. Quasar's `.text-white` carries !important, so it wins; the class
+             goes away with Ionic's CSS. -->
+        <q-btn flat to="/settings" label="Ustawienia" class="text-white" />
+        <logout-button />
         <attribution-info />
-      </ion-toolbar>
-    </ion-header>
-    <ion-content :scroll-y="false" class="[--overflow:hidden]">
-      <!-- Anchored to ion-content (position:relative, full height). A percentage
-           height (h-full) would collapse to 0 here because ion-content sets
-           `contain: size`, so the map is sized via absolute inset instead. -->
-      <div ref="mapEl" class="absolute inset-0" />
-      <div
-        v-if="geoError"
-        class="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-dark shadow-md"
-      >
-        {{ geoError }}
-      </div>
-      <ion-fab vertical="bottom" horizontal="end" slot="fixed">
-        <ion-fab-button @click="isFilterOpen = true">
-          <ion-icon :icon="filterOutline" />
-        </ion-fab-button>
-      </ion-fab>
-      <category-filter v-model:is-open="isFilterOpen" />
-    </ion-content>
-  </ion-page>
+      </q-toolbar>
+    </q-header>
+    <q-page-container>
+      <q-page>
+        <!-- Anchored to the page box: QPage is sized by a JS-computed `min-height` (viewport
+             minus the header/footer offsets) and never gets a definite height, so a percentage
+             height would resolve against `auto` and collapse to 0. `.q-page` is position:relative,
+             so an absolute inset gives the map the full page box without any JS. -->
+        <div ref="mapEl" class="absolute inset-0" />
+        <div
+          v-if="geoError"
+          class="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-dark shadow-md"
+        >
+          {{ geoError }}
+        </div>
+        <q-page-sticky position="bottom-right" :offset="[16, 16]">
+          <q-btn
+            fab
+            round
+            color="primary"
+            :icon="symRoundedTune"
+            aria-label="Filtr kategorii"
+            @click="isFilterOpen = true"
+          />
+        </q-page-sticky>
+        <category-filter v-model="isFilterOpen" />
+      </q-page>
+    </q-page-container>
+  </q-layout>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonContent, IonFab, IonFabButton, IonIcon } from '@ionic/vue'
-import { filterOutline } from 'ionicons/icons'
+import { onActivated, onDeactivated, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import {
+  QLayout,
+  QHeader,
+  QToolbar,
+  QToolbarTitle,
+  QSpace,
+  QBtn,
+  QPageContainer,
+  QPage,
+  QPageSticky,
+} from 'quasar'
+import { symRoundedTune } from '@quasar/extras/material-symbols-rounded'
 import { Map as MapLibreMap, Marker } from 'maplibre-gl'
 import { useGeolocation, WROCLAW_FALLBACK } from '@/composables/useGeolocation'
 import { useNearbyPois, type UseNearbyPois } from '@/composables/useNearbyPois'
@@ -44,11 +65,13 @@ import CategoryFilter from '@/components/CategoryFilter.vue'
 import AttributionInfo from '@/components/AttributionInfo.vue'
 import LogoutButton from '@/components/LogoutButton.vue'
 
+// Load-bearing: App.vue's <keep-alive :include="['MapView']"> matches on the component name.
+defineOptions({ name: 'MapView' })
+
 const isFilterOpen = ref(false)
 const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
 let map: MapLibreMap | null = null
 let userMarker: Marker | null = null
-let resizeObserver: ResizeObserver | null = null
 let nearby: UseNearbyPois | null = null
 let poiLayer: UseNearbyPoiLayer | null = null
 let firstFixDone = false
@@ -69,6 +92,8 @@ function createUserMarkerElement(): HTMLElement {
   return wrapper
 }
 
+// Everything that must exist exactly once lives here: under KeepAlive this runs on the first
+// visit only, so no listener, timer, observer or subscription can be opened twice.
 onMounted(() => {
   if (!mapEl.value) return
 
@@ -83,17 +108,28 @@ onMounted(() => {
     },
   })
 
-  // Ionic hydrates ion-content asynchronously, so this container is often still
-  // 0x0 when the map is created — MapLibre would capture that size and render
-  // blank (trackResize only listens to the window). Observe the container and
-  // resize the map once it gains real dimensions.
-  resizeObserver = new ResizeObserver(() => map?.resize())
-  resizeObserver.observe(mapEl.value)
-
   nearby = useNearbyPois(map)
   poiLayer = useNearbyPoiLayer(map, nearby.items)
 
   start()
+})
+
+// /map is cached (App.vue), so navigating away deactivates this view instead of destroying it.
+// Deliberately kept alive: the map and its WebGL context, the POI source/layer and the items
+// already fetched — that cache is the whole point. Paused: the GPS watch, because holding
+// watchPosition on a screen nobody is looking at only drains the battery. `start()` is
+// idempotent while a watch id is held, so the activated hook Vue also fires right after the
+// initial mount is a no-op; the map guard keeps it that way on the path where onMounted bailed.
+onActivated(() => {
+  if (!map) return
+  start()
+})
+
+// The dialog is teleported to <body>, so it does not go away with the view's DOM: left open, it
+// would hang over whatever renders next (the login screen, when a revoked session routes there).
+onDeactivated(() => {
+  stop()
+  isFilterOpen.value = false
 })
 
 watch(
@@ -118,14 +154,14 @@ watch(
   },
 )
 
+// Under KeepAlive this no longer runs on navigation — only when the cache is dropped (app
+// teardown) or when MapView is mounted outside the cache. Still the single full teardown.
 onUnmounted(() => {
   stop()
   poiLayer?.stop()
   poiLayer = null
   nearby?.stop()
   nearby = null
-  resizeObserver?.disconnect()
-  resizeObserver = null
   userMarker?.remove()
   userMarker = null
   map?.remove()

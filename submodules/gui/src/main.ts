@@ -35,6 +35,7 @@ void resumePendingLogout()
 void ensureSessionResolved()
 
 // mode 'ios' is load-bearing until M2.5-05 (P7): Ionic's default platform class is literally `md`,
-// which Quasar's `.md { display: none !important }` visibility helper hides, blanking <ion-app>.
-// Removed together with Ionic in M2.5-05.
+// which Quasar's `.md { display: none !important }` visibility helper hides inside the md
+// breakpoint. The shell is Quasar's now, but Ionic still stamps that class on every component the
+// six form screens render, so without this they disappear. Removed with Ionic in M2.5-05.
 createApp(App).use(IonicVue, { mode: 'ios' }).use(Quasar, { iconSet }).use(router).mount('#app')

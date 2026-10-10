@@ -1,42 +1,42 @@
 <template>
-  <ion-modal :is-open="isOpen" @did-dismiss="$emit('update:isOpen', false)">
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Kategorie</ion-title>
-        <ion-buttons slot="end">
-          <ion-button @click="$emit('update:isOpen', false)">Zamknij</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content>
-      <ion-list>
-        <ion-item v-for="slug in CATEGORY_SLUGS" :key="slug">
-          <ion-toggle :checked="isSelected(slug)" @ion-change="toggle(slug)">
-            {{ CATEGORY_LABELS[slug] }}
-          </ion-toggle>
-        </ion-item>
-      </ion-list>
-    </ion-content>
-  </ion-modal>
+  <q-dialog v-model="isOpen">
+    <q-card>
+      <q-toolbar>
+        <q-toolbar-title>Kategorie</q-toolbar-title>
+        <q-space />
+        <q-btn flat label="Zamknij" @click="isOpen = false" />
+      </q-toolbar>
+      <q-list>
+        <q-item v-for="slug in CATEGORY_SLUGS" :key="slug">
+          <q-item-section>
+            <q-toggle
+              :model-value="isSelected(slug)"
+              :label="CATEGORY_LABELS[slug]"
+              @update:model-value="toggle(slug)"
+            />
+          </q-item-section>
+        </q-item>
+      </q-list>
+    </q-card>
+  </q-dialog>
 </template>
 
 <script setup lang="ts">
 import {
-  IonModal,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonButtons,
-  IonButton,
-  IonContent,
-  IonList,
-  IonItem,
-  IonToggle,
-} from '@ionic/vue'
+  QDialog,
+  QCard,
+  QToolbar,
+  QToolbarTitle,
+  QSpace,
+  QBtn,
+  QList,
+  QItem,
+  QItemSection,
+  QToggle,
+} from 'quasar'
 import { CATEGORY_SLUGS, CATEGORY_LABELS, useCategorySelection } from '@/composables/useCategorySelection'
 
-defineProps<{ isOpen: boolean }>()
-defineEmits<{ 'update:isOpen': [value: boolean] }>()
+const isOpen = defineModel<boolean>({ required: true })
 
 const { isSelected, toggle } = useCategorySelection()
 </script>

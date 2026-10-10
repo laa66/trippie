@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { IonButton } from '@ionic/vue'
 
 const router = { replace: vi.fn() }
 vi.mock('vue-router', () => ({ useRouter: () => router }))
@@ -14,20 +13,27 @@ beforeEach(() => vi.clearAllMocks())
 describe('LogoutButton', () => {
   it('logs out and routes to /login', async () => {
     const wrapper = mount(LogoutButton)
-    await wrapper.find('ion-button').trigger('click')
+    await wrapper.find('button').trigger('click')
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(logout).toHaveBeenCalledOnce()
     expect(router.replace).toHaveBeenCalledWith('/login')
   })
 
-  it('disables the button while the logout is in flight', async () => {
+  // M2-19 double-submit block, asserted on the rendered DOM rather than on a prop: QBtn :disable
+  // renders a native <button disabled>, which really swallows the second click (P6) — under Ionic
+  // the handler still ran and only the prop could be checked.
+  it('disables the button while the logout is in flight and swallows a second click', async () => {
     let finish!: () => void
     vi.mocked(logout).mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
     const wrapper = mount(LogoutButton)
-    expect(wrapper.findComponent(IonButton).props('disabled')).toBe(false)
+    const button = wrapper.find('button')
+    expect(button.element.disabled).toBe(false)
 
-    await wrapper.find('ion-button').trigger('click')
-    expect(wrapper.findComponent(IonButton).props('disabled')).toBe(true)
+    await button.trigger('click')
+    expect(button.element.disabled).toBe(true)
+
+    await button.trigger('click')
+    expect(logout).toHaveBeenCalledOnce()
 
     finish()
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -49,7 +55,7 @@ describe('LogoutButton', () => {
       })
 
       const wrapper = mount(LogoutButton)
-      await wrapper.find('ion-button').trigger('click')
+      await wrapper.find('button').trigger('click')
       expect(router.replace).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(5_000)
