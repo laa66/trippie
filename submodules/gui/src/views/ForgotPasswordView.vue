@@ -1,33 +1,44 @@
 <template>
-  <q-layout view="hHh lpR fFf">
-    <q-header>
-      <q-toolbar>
-        <q-toolbar-title>Odzyskiwanie hasła</q-toolbar-title>
-      </q-toolbar>
-    </q-header>
-    <q-page-container>
-      <q-page class="p-4">
-        <q-input
-          v-model="email"
-          outlined
-          type="email"
-          autocomplete="email"
-          label="E-mail"
-        />
-        <p v-if="error" class="text-danger" role="alert">{{ error }}</p>
-        <p v-if="sent" role="status">Jeśli konto istnieje, wysłaliśmy na ten adres kod do zmiany hasła. Sprawdź e-mail.</p>
-        <q-btn class="w-full" :disable="busy" @click="submit">Wyślij kod</q-btn>
-        <q-btn class="w-full" flat @click="goToReset">Mam już kod</q-btn>
-        <q-btn class="w-full" flat to="/login">Wróć do logowania</q-btn>
-      </q-page>
-    </q-page-container>
-  </q-layout>
+  <app-screen title="Odzyskiwanie hasła">
+    <div class="space-y-4">
+      <q-input
+        v-model="email"
+        outlined
+        type="email"
+        autocomplete="email"
+        label="E-mail"
+        color="primary"
+      />
+      <app-notice v-if="error" variant="danger" role="alert">{{ error }}</app-notice>
+      <app-notice v-if="sent" variant="info" role="status">
+        Jeśli konto istnieje, wysłaliśmy na ten adres kod do zmiany hasła. Sprawdź e-mail.
+      </app-notice>
+      <q-btn
+        class="mt-2 w-full"
+        color="primary"
+        unelevated
+        no-caps
+        size="lg"
+        :disable="busy"
+        :loading="busy"
+        @click="submit"
+      >
+        Wyślij kod
+      </q-btn>
+    </div>
+    <template #footer>
+      <q-btn flat no-caps dense color="primary" @click="goToReset">Mam już kod</q-btn>
+      <q-btn flat no-caps dense class="text-ink-muted" to="/login">Wróć do logowania</q-btn>
+    </template>
+  </app-screen>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { QLayout, QHeader, QToolbar, QToolbarTitle, QPageContainer, QPage, QInput, QBtn } from 'quasar'
+import { QInput, QBtn } from 'quasar'
+import AppScreen from '@/components/ui/AppScreen.vue'
+import AppNotice from '@/components/ui/AppNotice.vue'
 import { AuthApiError, requestPasswordReset } from '@/lib/authClient'
 
 const router = useRouter()

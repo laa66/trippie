@@ -9,6 +9,7 @@ vi.mock('@/lib/authClient', async (importOriginal) => ({
   requestPasswordReset: vi.fn(),
 }))
 
+import rawView from '@/views/ForgotPasswordView.vue?raw'
 import { AuthApiError, requestPasswordReset } from '@/lib/authClient'
 import ForgotPasswordView from '@/views/ForgotPasswordView.vue'
 
@@ -69,5 +70,14 @@ describe('ForgotPasswordView', () => {
     await fillInputs(wrapper, ['user@example.com'])
     await clickButton(wrapper, 'Mam już kod')
     expect(router.push).toHaveBeenCalledWith({ path: '/reset-password', query: { email: 'user@example.com' } })
+  })
+
+  // The parametrised test above is a whitelist of statuses, so a branch on any status outside it
+  // (422, 451, ...) would reintroduce a user-enumeration oracle with the suite still green - Light
+  // proved exactly that with a 418 branch. This pins the shape instead of the sample: the catch may
+  // compare the status to 400 and to nothing else.
+  it('branches on no status other than 400, so no response can become an enumeration oracle', () => {
+    const compared = [...rawView.matchAll(/\.status === (\d+)/g)].map((m) => m[1])
+    expect(compared).toEqual(['400'])
   })
 })

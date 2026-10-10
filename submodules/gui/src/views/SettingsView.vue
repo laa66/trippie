@@ -4,26 +4,32 @@
       <q-toolbar>
         <q-toolbar-title>Ustawienia</q-toolbar-title>
         <q-space />
-        <q-btn flat to="/map">Mapa</q-btn>
+        <q-btn flat no-caps to="/map">Mapa</q-btn>
       </q-toolbar>
     </q-header>
     <q-page-container>
-      <q-page class="p-4">
-        <p v-if="error" class="text-danger" role="alert">{{ error }}</p>
-        <q-list>
-          <q-item-label header>Domyślny tryb treści</q-item-label>
+      <q-page class="mx-auto w-full max-w-md space-y-4 px-4 py-6">
+        <app-notice v-if="error" variant="danger" role="alert">{{ error }}</app-notice>
+        <q-list class="rounded-card bg-surface pb-2 shadow-card">
+          <q-item-label header class="text-ink-muted">Domyślny tryb treści</q-item-label>
           <q-option-group
+            class="px-2"
+            aria-label="Domyślny tryb treści"
             type="radio"
+            color="primary"
             :model-value="defaultContentMode"
             :options="modeOptions"
             @update:model-value="onModeChange"
           />
         </q-list>
-        <q-list>
-          <q-item-label header>Kategorie</q-item-label>
+        <q-list class="rounded-card bg-surface pb-2 shadow-card">
+          <q-item-label header class="text-ink-muted">Kategorie</q-item-label>
           <q-item v-for="slug in CATEGORY_SLUGS" :key="slug">
             <q-item-section>
               <q-toggle
+                class="w-full flex-nowrap justify-between"
+                left-label
+                color="primary"
                 :model-value="isSelected(slug)"
                 :label="CATEGORY_LABELS[slug]"
                 @update:model-value="toggle(slug)"
@@ -53,6 +59,7 @@ import {
   QOptionGroup,
   QToggle,
 } from 'quasar'
+import AppNotice from '@/components/ui/AppNotice.vue'
 import { CATEGORY_SLUGS, CATEGORY_LABELS, useCategorySelection } from '@/composables/useCategorySelection'
 import { CONTENT_MODES, type ContentMode } from '@/lib/settingsApi'
 

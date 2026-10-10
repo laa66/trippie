@@ -72,8 +72,27 @@
             <app-notice variant="warning" role="status">
               Poprzednie wylogowanie nie zostało potwierdzone przez serwer — sesja może być nadal aktywna.
             </app-notice>
-            <app-notice variant="info">Jeśli konto istnieje, wysłaliśmy na ten adres kod.</app-notice>
+            <app-notice variant="info" role="status">Jeśli konto istnieje, wysłaliśmy na ten adres kod.</app-notice>
           </div>
+        </section>
+
+        <section class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Settings card</h2>
+          <!-- App-screen pattern (SettingsView): a card per section, header via q-item-label,
+               brand-coloured controls. The controls need no display fix here - P15 is handled once
+               in theme.css, in the utilities layer. -->
+          <q-list class="rounded-card bg-surface pb-2 shadow-card">
+            <q-item-label header class="text-ink-muted">Grupa opcji</q-item-label>
+            <q-option-group v-model="mode" class="px-2" type="radio" color="primary" :options="modes" />
+          </q-list>
+          <q-list class="rounded-card bg-surface pb-2 shadow-card">
+            <q-item-label header class="text-ink-muted">Przełączniki</q-item-label>
+            <q-item v-for="t in toggles" :key="t.label">
+              <q-item-section>
+                <q-toggle v-model="t.on" class="w-full flex-nowrap justify-between" left-label color="primary" :label="t.label" />
+              </q-item-section>
+            </q-item>
+          </q-list>
         </section>
 
         <section class="space-y-3">
@@ -92,13 +111,35 @@
 </template>
 
 <script setup lang="ts">
-import { QLayout, QPageContainer, QPage, QInput, QBtn } from 'quasar'
+import { ref } from 'vue'
+import {
+  QLayout,
+  QPageContainer,
+  QPage,
+  QInput,
+  QBtn,
+  QList,
+  QItem,
+  QItemSection,
+  QItemLabel,
+  QOptionGroup,
+  QToggle,
+} from 'quasar'
 import AppLogo from '@/components/ui/AppLogo.vue'
 import AppNotice from '@/components/ui/AppNotice.vue'
 
 // The canvas for M2.5-06: states that are awkward to reach on a live screen (a field in error, a
 // button mid-request) sit here side by side. Dev-only route, dynamically imported, so it never
 // reaches the production bundle.
+const mode = ref('AUDIO')
+const modes = [
+  { value: 'TEXT', label: 'Tekst' },
+  { value: 'AUDIO', label: 'Audio' },
+]
+const toggles = ref([
+  { label: 'Włączony', on: true },
+  { label: 'Wyłączony', on: false },
+])
 const brand = [
   { token: 'primary', note: 'action, carries white text (5.13:1)', class: 'bg-primary text-ink-inverse' },
   { token: 'secondary', note: 'decorative accent only, never text', class: 'bg-secondary text-dark' },

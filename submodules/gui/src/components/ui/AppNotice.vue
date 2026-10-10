@@ -21,7 +21,10 @@ import { symRoundedError, symRoundedWarning, symRoundedInfo } from '@quasar/extr
 // only carrier, and the colour it does use has to pass AA. The M2-19 logout notice used to be a
 // bare `#ffc409` label on white - 1.60:1, effectively unreadable. Here the hue lives in a tint
 // behind dark text, so contrast comes from the ink, not the brand hue.
-const props = defineProps<{ variant: 'danger' | 'warning' | 'info'; role?: 'alert' | 'status' }>()
+// `role` is required, not optional: the whole point of funnelling every message through here is
+// that none of them can be announced-less, and an optional prop would let the next one slip out
+// silently. vue-tsc now rejects a notice without it.
+const props = defineProps<{ variant: 'danger' | 'warning' | 'info'; role: 'alert' | 'status' }>()
 
 const tones = {
   danger: { box: 'bg-tint-danger text-danger', icon: symRoundedError, ink: 'text-danger' },

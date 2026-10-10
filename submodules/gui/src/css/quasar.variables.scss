@@ -25,3 +25,10 @@ $info: #0f6b7d;
 // Shape. Quasar reads these at build time for every component that rounds a corner.
 $generic-border-radius: 12px;
 $button-border-radius: 12px;
+
+// 16px, not Quasar's 14px default. `.q-field` is a class and our `body { font-size: 1rem }` is an
+// element selector, so the default wins and every input renders at 14px - at which point iOS Safari
+// zooms the viewport when the field takes focus. The frozen design system calls for a 16px form
+// baseline; this is what actually delivers it.
+$input-font-size: 16px;
+

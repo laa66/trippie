@@ -125,3 +125,25 @@
     line-height: 1.5;
   }
 }
+
+@layer utilities {
+  /*
+   * P15. Quasar marks QRadio / QCheckbox / QToggle with `row inline` and relies on its own
+   * `.row.inline { display: inline-flex }`. That rule lives in @layer base (we import Quasar's sass
+   * there), while Tailwind's `.inline { display: inline }` lives in @layer utilities - and a later
+   * LAYER wins regardless of specificity, so every one of those controls collapses to `display:
+   * inline`: the radio dot or the switch stacks above its label and the row doubles in height.
+   * Nothing in jsdom sees it, so no test catches it either.
+   *
+   * Re-asserting it here, in Tailwind's own layer and with two classes (0,2,0 beats 0,1,0; source
+   * order is irrelevant), restores Quasar's intent once instead of per screen. This mirrors
+   * Quasar's rule rather than listing components on purpose: the same collapse was measured on
+   * QChip, QFab, QFab actions and QRating, so a component whitelist would just be re-found later.
+   */
+  .row.inline,
+  .column.inline,
+  .flex.inline {
+    display: inline-flex;
+  }
+}
+
