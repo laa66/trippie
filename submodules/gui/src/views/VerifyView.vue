@@ -1,44 +1,40 @@
 <template>
-  <ion-page>
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Weryfikacja e-mail</ion-title>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding">
-      <ion-item>
-        <ion-input
+  <q-layout view="hHh lpR fFf">
+    <q-header>
+      <q-toolbar>
+        <q-toolbar-title>Weryfikacja e-mail</q-toolbar-title>
+      </q-toolbar>
+    </q-header>
+    <q-page-container>
+      <q-page class="p-4">
+        <q-input
+          v-model="email"
+          outlined
           type="email"
-          label="E-mail"
-          label-placement="floating"
           autocomplete="email"
-          :value="email"
-          @ion-input="email = String($event.detail.value ?? '')"
+          label="E-mail"
         />
-      </ion-item>
-      <ion-item>
-        <ion-input
-          label="Kod z e-maila"
-          label-placement="floating"
+        <q-input
+          v-model="code"
+          outlined
           inputmode="numeric"
           :maxlength="6"
           autocomplete="one-time-code"
-          :value="code"
-          @ion-input="code = String($event.detail.value ?? '')"
+          label="Kod z e-maila"
         />
-      </ion-item>
-      <p v-if="error" class="text-danger" role="alert">{{ error }}</p>
-      <p v-if="info" role="status">{{ info }}</p>
-      <ion-button expand="block" :disabled="busy" @click="submit">Potwierdź</ion-button>
-      <ion-button expand="block" fill="clear" :disabled="busy" @click="resend">Wyślij kod ponownie</ion-button>
-    </ion-content>
-  </ion-page>
+        <p v-if="error" class="text-danger" role="alert">{{ error }}</p>
+        <p v-if="info" role="status">{{ info }}</p>
+        <q-btn class="w-full" :disable="busy" @click="submit">Potwierdź</q-btn>
+        <q-btn class="w-full" flat :disable="busy" @click="resend">Wyślij kod ponownie</q-btn>
+      </q-page>
+    </q-page-container>
+  </q-layout>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonItem, IonInput, IonButton } from '@ionic/vue'
+import { QLayout, QHeader, QToolbar, QToolbarTitle, QPageContainer, QPage, QInput, QBtn } from 'quasar'
 import { AuthApiError, resendCode, verifyEmail } from '@/lib/authClient'
 
 const route = useRoute()

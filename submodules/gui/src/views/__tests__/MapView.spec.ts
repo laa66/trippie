@@ -35,14 +35,6 @@ vi.mock('maplibre-gl', () => {
   return { Map: FakeMap, Marker: FakeMarker }
 })
 
-// jsdom has no ResizeObserver and QLayout throws without one (MapView itself no longer uses it —
-// MapLibre installs its own on the container).
-class FakeResizeObserver {
-  observe() {}
-  disconnect() {}
-}
-vi.stubGlobal('ResizeObserver', FakeResizeObserver)
-
 import MapView from '@/views/MapView.vue'
 
 describe('MapView', () => {

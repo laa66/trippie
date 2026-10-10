@@ -31,7 +31,7 @@ describe('ForgotPasswordView over the real authClient', () => {
         }),
       )
       const wrapper = mount(ForgotPasswordView)
-      fillInputs(wrapper, ['user@example.com'])
+      await fillInputs(wrapper, ['user@example.com'])
       await clickButton(wrapper, 'Wyślij kod')
       expect(wrapper.find('[role=alert]').exists()).toBe(false)
       expect(wrapper.find('[role=status]').exists()).toBe(false)

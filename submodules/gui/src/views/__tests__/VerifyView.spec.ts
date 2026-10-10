@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { IonInput } from '@ionic/vue'
 import { clickButton, fillInputs } from './authViewsHelpers'
 
 const router = { push: vi.fn(), replace: vi.fn() }
@@ -23,7 +22,7 @@ describe('VerifyView', () => {
   it('verifies with the email from the route query and routes to /login', async () => {
     vi.mocked(verifyEmail).mockResolvedValue()
     const wrapper = mount(VerifyView)
-    fillInputs(wrapper, ['new@example.com', '123456'])
+    await fillInputs(wrapper, ['new@example.com', '123456'])
     await clickButton(wrapper, 'Potwierdź')
     expect(verifyEmail).toHaveBeenCalledWith('new@example.com', '123456')
     expect(router.replace).toHaveBeenCalledWith('/login')
@@ -31,13 +30,13 @@ describe('VerifyView', () => {
 
   it('prefills the email input from the route query', () => {
     const wrapper = mount(VerifyView)
-    expect(wrapper.findComponent(IonInput).props('value')).toBe('new@example.com')
+    expect(wrapper.find('input').element.value).toBe('new@example.com')
   })
 
   it('shows the backend message on a 400 wrong/expired code', async () => {
     vi.mocked(verifyEmail).mockRejectedValue(new AuthApiError(400, null, 'Invalid or expired code'))
     const wrapper = mount(VerifyView)
-    fillInputs(wrapper, ['new@example.com', '000000'])
+    await fillInputs(wrapper, ['new@example.com', '000000'])
     await clickButton(wrapper, 'Potwierdź')
     expect(wrapper.find('[role=alert]').text()).toBe('Invalid or expired code')
     expect(router.replace).not.toHaveBeenCalled()

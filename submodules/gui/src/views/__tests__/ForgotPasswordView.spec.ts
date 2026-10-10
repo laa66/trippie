@@ -16,7 +16,7 @@ beforeEach(() => vi.clearAllMocks())
 
 async function submit(email = 'user@example.com'): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(ForgotPasswordView)
-  fillInputs(wrapper, [email])
+  await fillInputs(wrapper, [email])
   await clickButton(wrapper, 'Wyślij kod')
   return wrapper
 }
@@ -72,7 +72,7 @@ describe('ForgotPasswordView', () => {
 
   it('"Mam już kod" routes to /reset-password carrying only the email', async () => {
     const wrapper = mount(ForgotPasswordView)
-    fillInputs(wrapper, ['user@example.com'])
+    await fillInputs(wrapper, ['user@example.com'])
     await clickButton(wrapper, 'Mam już kod')
     expect(router.push).toHaveBeenCalledWith({ path: '/reset-password', query: { email: 'user@example.com' } })
   })

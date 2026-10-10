@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { IonInput } from '@ionic/vue'
 import { clickButton, fillInputs } from './authViewsHelpers'
 
 const router = { push: vi.fn(), replace: vi.fn() }
@@ -20,14 +19,14 @@ beforeEach(() => vi.clearAllMocks())
 
 async function submit(): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(ResetPasswordView)
-  fillInputs(wrapper, ['user@example.com', '123456', 'brand-new-pw'])
+  await fillInputs(wrapper, ['user@example.com', '123456', 'brand-new-pw'])
   await clickButton(wrapper, 'Zmień hasło')
   return wrapper
 }
 
 describe('ResetPasswordView', () => {
   it('prefills the email from the route query', () => {
-    expect(mount(ResetPasswordView).findComponent(IonInput).props('value')).toBe('user@example.com')
+    expect(mount(ResetPasswordView).find('input').element.value).toBe('user@example.com')
   })
 
   it('resets and routes to /login', async () => {

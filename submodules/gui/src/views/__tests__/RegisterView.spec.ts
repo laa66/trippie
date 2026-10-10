@@ -16,7 +16,7 @@ beforeEach(() => vi.clearAllMocks())
 
 async function submit(): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(RegisterView)
-  fillInputs(wrapper, ['new@example.com', 'long-enough-pw'])
+  await fillInputs(wrapper, ['new@example.com', 'long-enough-pw'])
   await clickButton(wrapper, 'Zarejestruj')
   return wrapper
 }

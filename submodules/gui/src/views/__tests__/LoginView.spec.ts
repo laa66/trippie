@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { IonButton } from '@ionic/vue'
 import { clickButton, fillInputs } from './authViewsHelpers'
 
 const router = { push: vi.fn(), replace: vi.fn() }
@@ -17,7 +16,7 @@ beforeEach(() => vi.clearAllMocks())
 
 async function submit(): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(LoginView)
-  fillInputs(wrapper, ['user@example.com', 'secret-pw'])
+  await fillInputs(wrapper, ['user@example.com', 'secret-pw'])
   await clickButton(wrapper, 'Zaloguj')
   return wrapper
 }
@@ -64,14 +63,16 @@ describe('LoginView', () => {
       })
 
       const wrapper = mount(LoginView)
-      fillInputs(wrapper, ['user@example.com', 'secret-pw'])
+      await fillInputs(wrapper, ['user@example.com', 'secret-pw'])
       await clickButton(wrapper, 'Zaloguj')
-      expect(wrapper.findAllComponents(IonButton)[0].props('disabled')).toBe(true)
+      const submitButton = () => wrapper.findAll('button').find((b) => b.text().includes('Zaloguj'))!
+      expect(submitButton().element.disabled).toBe(true)
+      expect(submitButton().attributes('tabindex')).toBe('-1')
       expect(wrapper.find('[role=alert]').exists()).toBe(false)
 
       await vi.advanceTimersByTimeAsync(10_000)
 
-      expect(wrapper.findAllComponents(IonButton)[0].props('disabled')).toBe(false)
+      expect(submitButton().element.disabled).toBe(false)
       expect(wrapper.find('[role=alert]').exists()).toBe(true)
       expect(wrapper.find('[role=alert]').text()).toContain('Nie udało się zalogować')
       expect(router.replace).not.toHaveBeenCalled()

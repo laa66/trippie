@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { IonRadioGroup, IonToggle } from '@ionic/vue'
+import { QOptionGroup, QToggle } from 'quasar'
 
 vi.mock('@/lib/settingsApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/settingsApi')>()),
@@ -25,12 +25,14 @@ describe('SettingsView', () => {
     await flushPromises()
     const wrapper = mount(SettingsView)
 
-    expect(wrapper.findComponent(IonRadioGroup).props('value')).toBe('AUDIO')
-    const toggles = wrapper.findAllComponents(IonToggle)
+    expect(wrapper.findComponent(QOptionGroup).props('modelValue')).toBe('AUDIO')
+    expect(wrapper.findAll('.q-radio')).toHaveLength(3)
+    expect(wrapper.findAll('.q-radio').map((r) => r.text())).toEqual(['Tekst', 'Audio', 'Tekst i audio'])
+    const toggles = wrapper.findAllComponents(QToggle)
     expect(toggles).toHaveLength(8)
-    expect(toggles.filter((t) => t.props('checked')).map((t) => t.text())).toEqual(['Muzea'])
+    expect(toggles.filter((t) => t.props('modelValue')).map((t) => t.text())).toEqual(['Muzea'])
 
-    toggles[1].vm.$emit('ionChange')
+    toggles[1].vm.$emit('update:model-value', true)
     await flushPromises()
     expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'] }, expect.anything())
   })
@@ -41,13 +43,13 @@ describe('SettingsView', () => {
     setAccessToken('jwt')
     await flushPromises()
     const wrapper = mount(SettingsView)
-    const group = wrapper.findComponent(IonRadioGroup)
+    const group = wrapper.findComponent(QOptionGroup)
 
-    group.vm.$emit('ionChange', { detail: { value: 'BOTH' } })
+    group.vm.$emit('update:model-value', 'BOTH')
     await flushPromises()
     expect(putSettings).not.toHaveBeenCalled()
 
-    group.vm.$emit('ionChange', { detail: { value: 'TEXT' } })
+    group.vm.$emit('update:model-value', 'TEXT')
     await flushPromises()
     expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums'] }, expect.anything())
   })
@@ -59,7 +61,7 @@ describe('SettingsView', () => {
     await flushPromises()
     const wrapper = mount(SettingsView)
 
-    wrapper.findAllComponents(IonToggle)[1].vm.$emit('ionChange')
+    wrapper.findAllComponents(QToggle)[1].vm.$emit('update:model-value', true)
     await flushPromises()
 
     expect(wrapper.find('[role=alert]').text()).toContain('Nie udało się zapisać')
