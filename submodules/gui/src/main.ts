@@ -1,27 +1,17 @@
 import { createApp } from 'vue'
-import { IonicVue } from '@ionic/vue'
 import { Quasar } from 'quasar'
 import iconSet from 'quasar/icon-set/svg-material-symbols-rounded.js'
 import App from './App.vue'
 import router from './router'
 import { ensureSessionResolved, resumePendingLogout } from '@/lib/authClient'
 
-/* Ionic core CSS (its own reset — Tailwind preflight stays disabled). */
-import '@ionic/vue/css/core.css'
-import '@ionic/vue/css/normalize.css'
-import '@ionic/vue/css/structure.css'
-import '@ionic/vue/css/typography.css'
-import '@ionic/vue/css/padding.css'
-import '@ionic/vue/css/flex-utils.css'
-import '@ionic/vue/css/display.css'
-
-/* Tailwind entry + Ionic palette tokens. MapLibre's stylesheet is imported
-   inside theme.css into @layer base so Tailwind utilities can override it (e.g.
-   .maplibregl-map's default position:relative). */
-import './theme.css'
-
-/* Quasar framework CSS (sass, layered into @layer base). */
+/* Quasar framework CSS (sass, layered into @layer base) FIRST, then our theme: both land in
+   @layer base, and within a layer the later rule wins at equal specificity, so theme.css's base
+   block is what overrides Quasar's own `body` typography. theme.css also carries the Tailwind
+   layers, the token chain and MapLibre's stylesheet (also into @layer base, so that Tailwind
+   utilities can beat `.maplibregl-map { position: relative }`). */
 import './css/quasar.scss'
+import './theme.css'
 
 // A logout the server never confirmed left a marker (M2-19): replay the bearer-less logout in the
 // background so the surviving refresh cookie is revoked server-side. Started first, and it reads the
@@ -34,8 +24,4 @@ void resumePendingLogout()
 // if a session exists. Started before mount; the nav guard awaits the same memoized promise.
 void ensureSessionResolved()
 
-// mode 'ios' is load-bearing until M2.5-05 (P7): Ionic's default platform class is literally `md`,
-// which Quasar's `.md { display: none !important }` visibility helper hides inside the md
-// breakpoint. The shell is Quasar's now, but Ionic still stamps that class on every component the
-// six form screens render, so without this they disappear. Removed with Ionic in M2.5-05.
-createApp(App).use(IonicVue, { mode: 'ios' }).use(Quasar, { iconSet }).use(router).mount('#app')
+createApp(App).use(Quasar, { iconSet }).use(router).mount('#app')

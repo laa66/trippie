@@ -19,6 +19,18 @@ export const routes: RouteRecordRaw[] = [
   { path: '/reset-password', component: ResetPasswordView, meta: { guestOnly: true } },
 ]
 
+// Dev-only design-system gallery (M2.5-06). Registered conditionally and imported dynamically, so
+// the component never enters the production bundle.
+if (import.meta.env.DEV) {
+  // `guestOnly` is the only public shape authGuard offers (its logic stays frozen): the gallery is
+  // reachable while signed out, which is the state you design in, and bounces to /map when signed in.
+  routes.push({
+    path: '/style',
+    component: () => import('@/views/StyleGalleryView.vue'),
+    meta: { guestOnly: true },
+  })
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,

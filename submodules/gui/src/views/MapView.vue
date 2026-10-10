@@ -4,11 +4,7 @@
       <q-toolbar>
         <q-toolbar-title>Mapa</q-toolbar-title>
         <q-space />
-        <!-- text-white only until M2.5-05 (N4): a QBtn with `to` renders an <a>, and Ionic's
-             unlayered `a { color: var(--ion-color-primary) }` paints it #3880ff on a #3880ff
-             header — invisible. Quasar's `.text-white` carries !important, so it wins; the class
-             goes away with Ionic's CSS. -->
-        <q-btn flat to="/settings" label="Ustawienia" class="text-white" />
+        <q-btn flat to="/settings" label="Ustawienia" />
         <logout-button />
         <attribution-info />
       </q-toolbar>

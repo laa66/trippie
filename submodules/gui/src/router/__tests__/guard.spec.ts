@@ -21,7 +21,7 @@ async function setup(refresh: () => Promise<Response>) {
   return { router, store, client, fetchMock }
 }
 
-// First import of the real route table (MapView, Ionic, settings stack) is slow; pay it here, not on test 1's 5s budget.
+// First import of the real route table (MapView, settings stack) is slow; pay it here, not on test 1's 5s budget.
 beforeAll(async () => {
   await import('@/router/index')
 }, 60_000)

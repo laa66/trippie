@@ -20,8 +20,7 @@ describe('LogoutButton', () => {
   })
 
   // M2-19 double-submit block, asserted on the rendered DOM rather than on a prop: QBtn :disable
-  // renders a native <button disabled>, which really swallows the second click (P6) — under Ionic
-  // the handler still ran and only the prop could be checked.
+  // renders a native <button disabled>, which really swallows the second click (P6).
   it('disables the button while the logout is in flight and swallows a second click', async () => {
     let finish!: () => void
     vi.mocked(logout).mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))

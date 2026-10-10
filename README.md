@@ -154,8 +154,9 @@ docker stop trippie-auth
 Log in first (do this before stopping auth), then click **Wyloguj**. Within 5 seconds the app
 must land on `/login` and show the notice that the previous logout was not confirmed by the
 server. While that request hangs, **click Wyloguj repeatedly** — only one logout leg may
-actually start (unit tests can only pin the `disabled` prop; the real double-submit block is
-Ionic's runtime and is observable only here). Then:
+actually start (the block is pinned in unit tests by `doubleSubmit.spec.ts` and
+`LogoutButton.spec.ts` on the native `<button disabled>` (P6); this step confirms it on the live
+stack, and its fate is the user's call in M2.5-09). Then:
 
 ```bash
 docker start trippie-auth

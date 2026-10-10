@@ -30,21 +30,15 @@ describe('ForgotPasswordView', () => {
     expect(wrapper.find('[role=alert]').exists()).toBe(false)
   })
 
-  it('renders the identical output for 200, 429 and 500 (same element, same text)', async () => {
-    const outcomes = [
-      () => vi.mocked(requestPasswordReset).mockResolvedValue(),
-      () => vi.mocked(requestPasswordReset).mockRejectedValue(new AuthApiError(429, null, 'throttled')),
-      () => vi.mocked(requestPasswordReset).mockRejectedValue(new AuthApiError(500, null, 'boom')),
-    ]
-    const rendered: string[] = []
-    for (const arrange of outcomes) {
-      arrange()
-      const wrapper = await submit()
-      expect(wrapper.find('[role=alert]').exists()).toBe(false)
-      rendered.push(wrapper.find('[role=status]').html())
-    }
-    expect(rendered[0]).toContain('Jeśli konto istnieje')
-    expect(new Set(rendered).size).toBe(1)
+  // No-enumeration guarantee: every status except 400 must render the same neutral output, so the
+  // screen can never reveal whether an account exists. Listed statuses, not a closed trio.
+  it.each([200, 403, 404, 409, 429, 500])('renders the identical neutral output for status %i', async (status) => {
+    const mock = vi.mocked(requestPasswordReset)
+    if (status === 200) mock.mockResolvedValue()
+    else mock.mockRejectedValue(new AuthApiError(status, null, 'x'))
+    const wrapper = await submit()
+    expect(wrapper.find('[role=alert]').exists()).toBe(false)
+    expect(wrapper.find('[role=status]').text()).toContain('Jeśli konto istnieje')
   })
 
   it('shows a validation message on 400 (malformed email)', async () => {

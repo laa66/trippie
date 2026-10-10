@@ -33,6 +33,9 @@ describe('auth field contract', () => {
     expect(actual).toEqual(expected)
   })
 
+  // The screen title is pinned by copy, not by the chrome that renders it: AppScreen (M2.5-06)
+  // exposes `data-screen-title`, the not-yet-restyled screens still use a QToolbar. M2.5-07 moves
+  // the rest onto AppScreen, after which the toolbar branch can go.
   it.each([
     ['Login', LoginView, 'Logowanie'],
     ['Register', RegisterView, 'Rejestracja'],
@@ -40,8 +43,12 @@ describe('auth field contract', () => {
     ['Forgot', ForgotPasswordView, 'Odzyskiwanie hasła'],
     ['Reset', ResetPasswordView, 'Nowe hasło'],
     ['Settings', SettingsView, 'Ustawienia'],
-  ])('%s keeps its toolbar title', (_name, component, title) => {
-    expect(mount(component).find('.q-toolbar__title').text()).toBe(title)
+  ])('%s keeps its screen title', (_name, component, title) => {
+    const wrapper = mount(component)
+    const shell = wrapper.find('[data-screen-title]')
+    const titled = shell.exists() ? shell : wrapper.find('.q-toolbar__title')
+    expect(titled.exists()).toBe(true)
+    expect(titled.text()).toBe(title)
   })
 
   it('Settings keeps its section headers', () => {

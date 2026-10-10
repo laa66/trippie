@@ -1,17 +1,27 @@
-// Single source of truth for brand colors (M2.5-02).
+// Single source of truth for brand colour and shape (design system frozen in M2.5-06).
 //
 // Token chain (P4): this file (hex, sass vars) -> Quasar emits --q-primary, --q-secondary, ...
-// at build time -> theme.css @theme maps --color-* onto them (the last step is wired in
-// M2.5-05/06; until then theme.css still carries its own copy of the same palette).
+// at build time -> theme.css maps Tailwind's @theme tokens onto those.
 // Injected into every sass file by @quasar/vite-plugin via `sassVariables` (absolute path).
+// Swapping the import in quasar.scss for the prebuilt stylesheet, or dropping `sassVariables`,
+// silently reverts this whole palette to Quasar's default - tokenChain.spec.ts pins both.
 //
-// Palette is 1:1 with the former Ionic one. Role mapping: tertiary -> $accent,
-// success -> $positive, danger -> $negative. `medium` (#92949c) and `light` (#f4f5f8)
-// have no Quasar counterpart and stay own tokens in theme.css.
-$primary:   #3880ff;
-$secondary: #3dc2ff;
-$accent:    #5260ff;
-$positive:  #2dd36f;
-$negative:  #eb445a;
-$warning:   #ffc409;
-$dark:      #222428;
+// Brand is a deep green. $primary is the ACTION colour: it carries white label text, so it is
+// dark enough for WCAG AA (white on #0b7d5a = 5.13:1). $secondary is the vivid accent and is
+// decorative only - it does NOT pass AA against white and must never carry text.
+// $warning is the dark amber used for warning TEXT (6.38:1 on white); the bright amber tint it
+// pairs with lives in theme.css as a surface token, because a 14px #ffc409 label on white is
+// 1.60:1 and that is the colour the M2-19 security notice used to be rendered in.
+// Role mapping: success -> $positive, danger -> $negative, tertiary -> $accent.
+$primary: #0b7d5a;
+$secondary: #17c47e;
+$accent: #0f6b7d;
+$positive: #1b7f4d;
+$negative: #c62828;
+$warning: #8a5200;
+$dark: #10211b;
+$info: #0f6b7d;
+
+// Shape. Quasar reads these at build time for every component that rounds a corner.
+$generic-border-radius: 12px;
+$button-border-radius: 12px;
