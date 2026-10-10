@@ -1,0 +1,17 @@
+// Single source of truth for brand colors (M2.5-02).
+//
+// Token chain (P4): this file (hex, sass vars) -> Quasar emits --q-primary, --q-secondary, ...
+// at build time -> theme.css @theme maps --color-* onto them (the last step is wired in
+// M2.5-05/06; until then theme.css still carries its own copy of the same palette).
+// Injected into every sass file by @quasar/vite-plugin via `sassVariables` (absolute path).
+//
+// Palette is 1:1 with the former Ionic one. Role mapping: tertiary -> $accent,
+// success -> $positive, danger -> $negative. `medium` (#92949c) and `light` (#f4f5f8)
+// have no Quasar counterpart and stay own tokens in theme.css.
+$primary:   #3880ff;
+$secondary: #3dc2ff;
+$accent:    #5260ff;
+$positive:  #2dd36f;
+$negative:  #eb445a;
+$warning:   #ffc409;
+$dark:      #222428;

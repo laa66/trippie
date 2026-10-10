@@ -10,9 +10,9 @@ import { h } from 'vue'
  *
  * WHY THE BOOT GRAPH IS MOCKED (not an optimisation — a flakiness fix): `await import('@/main')`
  * pulls the real composition root, and through `./router` every view, including `MapView.vue`'s
- * value import of `maplibre-gl` (~1 MB), plus `@ionic/vue` and `ionicons`. Transpiling and executing
+ * value import of `maplibre-gl` (~1 MB), plus `@ionic/vue`, `ionicons` and `quasar`. Transpiling and executing
  * that graph cost ~1.7 s of the 5 s default budget on an idle machine and blew past it under
- * parallel Gradle/Testcontainers load. Mocking `App.vue`, the router and `IonicVue` removes the
+ * parallel Gradle/Testcontainers load. Mocking `App.vue`, the router, `IonicVue` and `Quasar` removes the
  * entire cost while touching nothing this spec asserts: the subject is which auth calls `main.ts`
  * makes and in what order, and that is unaffected by what gets mounted. Raising the timeout instead
  * would have kept a multi-second spec that only ever asserts two call orders.
@@ -28,6 +28,7 @@ vi.mock('@/lib/authClient', () => ({
 vi.mock('@/App.vue', () => ({ default: { name: 'AppStub', render: () => h('div') } }))
 vi.mock('@/router', () => ({ default: { install: () => undefined } }))
 vi.mock('@ionic/vue', () => ({ IonicVue: { install: () => undefined } }))
+vi.mock('quasar', () => ({ Quasar: { install: () => undefined } }))
 
 beforeEach(() => {
   vi.resetModules()

@@ -1,0 +1,5 @@
+// Quasar framework CSS compiled from sass and pinned into @layer base, so Tailwind
+// utilities (@layer utilities) win over same-named Quasar classes (P3, P11).
+@layer base {
+  @import 'quasar/src/css/index.sass';
+}

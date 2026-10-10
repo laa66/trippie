@@ -1,5 +1,7 @@
 import { createApp } from 'vue'
 import { IonicVue } from '@ionic/vue'
+import { Quasar } from 'quasar'
+import iconSet from 'quasar/icon-set/svg-material-symbols-rounded.js'
 import App from './App.vue'
 import router from './router'
 import { ensureSessionResolved, resumePendingLogout } from '@/lib/authClient'
@@ -18,6 +20,9 @@ import '@ionic/vue/css/display.css'
    .maplibregl-map's default position:relative). */
 import './theme.css'
 
+/* Quasar framework CSS (sass, layered into @layer base). */
+import './css/quasar.scss'
+
 // A logout the server never confirmed left a marker (M2-19): replay the bearer-less logout in the
 // background so the surviving refresh cookie is revoked server-side. Started first, and it reads the
 // marker synchronously, so ensureSessionResolved below still sees it and short-circuits to false
@@ -29,4 +34,7 @@ void resumePendingLogout()
 // if a session exists. Started before mount; the nav guard awaits the same memoized promise.
 void ensureSessionResolved()
 
-createApp(App).use(IonicVue).use(router).mount('#app')
+// mode 'ios' is load-bearing until M2.5-05 (P7): Ionic's default platform class is literally `md`,
+// which Quasar's `.md { display: none !important }` visibility helper hides, blanking <ion-app>.
+// Removed together with Ionic in M2.5-05.
+createApp(App).use(IonicVue, { mode: 'ios' }).use(Quasar, { iconSet }).use(router).mount('#app')
