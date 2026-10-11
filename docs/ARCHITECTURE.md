@@ -53,7 +53,7 @@ Mobile packaging is **not** — see "Out of MVP".
 | Runtime concurrency | Java 21 virtual threads on servlet services | `spring.threads.virtual.enabled=true`. Blocking JDBC/HTTP at high concurrency with simple imperative code. Gateway stays reactive (no VT needed). |
 | POI categories | User-selectable categories mapped to OSM tags | Users see friendly categories, not raw OSM tags. Category is derived at ingestion and stored on each POI. |
 | POI schema | Generic model + derived `category` + `tags` JSONB | Broad category set makes artwork-specific columns sparse. Keep common columns (`name`, `description`, `geom`, `osm_id`, indexed `category`) + everything else in `tags`. |
-| Frontend | Web-first (Vue 3 + Ionic + Tailwind v4) | Ship a working web app + full backend first; native comes last. Tailwind for all authored styling; Ionic for components. See "On styling". |
+| Frontend | Web-first (Vue 3 + Quasar + Tailwind v4) | Ship a working web app + full backend first; native comes last. Quasar supplies the components, Tailwind the layout; both read one token source. See "On styling". |
 | Map engine | MapLibre GL | Modern vector renderer; aligns with self-hosted tiles. |
 | Tiles | Self-hosted tile server (OSM mbtiles/pbf) | Full control, offline-friendly, no CDN limits. |
 | Auth | In MVP — dedicated service + JWT | MVP has per-user data; gateway validates tokens. |
@@ -87,29 +87,113 @@ partitioned ordering, or multiple independent consumers of the same stream becom
   needs a small `jti` **denylist** in Redis that the gateway checks. TTL = remaining token life.
   Optional for MVP — short access-token TTL already bounds the exposure.
 
-### On styling (Tailwind + Ionic)
+### On styling (Quasar + Tailwind)
 
-Rule: **Tailwind for everything we author; no ad-hoc plain CSS.** Full elimination of CSS is
-impossible and that is Ionic's nature, not a config gap — Ionic components live in **shadow DOM**,
-so Tailwind utilities cannot reach inside `ion-*`.
+Components come from Quasar; layout, spacing and the remaining authored markup come from Tailwind.
+Both read colour, shape and type from one token chain, so no component carries a colour or radius
+literal. Plain CSS is the exception: the scoped `<style>` blocks are the MapLibre attribution skin in
+`MapView.vue` (see "Map container") and a swatch in the dev-only gallery.
 
-- **Our UI** (layout, grids, spacing, custom components, positioning of `ion-*` hosts) → 100% Tailwind.
-- **Ionic components' look** → Ionic **CSS variables** (`--ion-color-*`, `--background`, `--color`).
-  These are Ionic design tokens, not loose CSS.
-- **Keep it in Tailwind anyway:** CSS custom properties **inherit through the shadow boundary**, so
-  Ionic is themed with Tailwind **arbitrary-property utilities** on the host, e.g.
-  `<ion-button class="[--background:theme(colors.blue.600)]">`. The global Ionic palette
-  (`--ion-color-*`) is mapped **once** onto the Tailwind theme tokens — one source of truth for color.
-- **No clash with Ionic:** Tailwind's **preflight is disabled** — it overrides web-component `:host`
-  rules and fights Ionic's own reset. In v4 (CSS-first, no `tailwind.config.js`) this is done by the
-  layered import that **omits** `preflight.css`; Ionic ships its own reset. Setup via
-  `@tailwindcss/vite`.
+**Token chain**
+
+1. `src/css/quasar.variables.scss`: brand palette, shape and input size as SASS variables. The only
+   file where brand hex values are written.
+2. `@quasar/vite-plugin` injects that file into every SASS compile (`sassVariables`, absolute path).
+   Quasar emits the values at build time as `--q-*` custom properties (`--q-primary`, `--q-negative`, ...).
+3. `src/theme.css`, `:root`: the **semantic layer**. Its custom properties name a role, not a colour:
+   `--app-bg`, `--app-surface`, `--app-surface-sunken`, `--app-ink`, `--app-ink-muted`, `--app-line`,
+   `--app-tint-{brand,warning,danger}`, `--app-shadow-{card,raised}`, and the `--app-poi-*` set.
+4. `@theme` in `theme.css` maps Tailwind tokens onto (2) and (3): `--color-primary: var(--q-primary)`,
+   `--color-surface: var(--app-surface)`, `--radius-card`, `--shadow-card`. Quasar's `$positive`,
+   `$negative` and `$accent` feed Tailwind's `success`, `danger` and `tertiary`.
+5. Components use utilities: `bg-surface`, `text-ink-muted`, `border-line`, `rounded-card`, `shadow-card`.
+
+**Why two layers.** Dark mode is meant to be an addition, not a rewrite: a `body--dark` block will
+redefine the semantic properties and no screen changes. It does not exist yet. For the same reason an
+SFC must not contain a hex value or an arbitrary value such as `bg-[#...]`, because a literal cannot be
+re-themed. The `--app-poi-*` set is also declared as literal values, since jsdom does not resolve
+`var()` indirection in custom properties and a token pointing at another token would read back
+differently in tests.
+
+**Text colour.** `$secondary` is decorative and never carries text. `$warning` is a dark amber for
+text; the bright amber exists only as the surface tint `--app-tint-warning`. Every text/background pair
+is measured against WCAG AA before use, and a new colour is measured the same way.
+
+**Typography.** Inter is self-hosted (`@fontsource-variable/inter`), since the app is one origin behind
+nginx. The base size is 16px. `$input-font-size: 16px` must stay: Quasar's 14px default on `.q-field`
+(a class) outranks the `body` element rule, and an input below 16px makes iOS Safari zoom on focus.
+
+**Preflight stays off.** `theme.css` imports `tailwindcss/theme.css` and `utilities.css` only. Quasar
+ships its own reset, so Tailwind's would duplicate it. One Quasar reset rule is overridden explicitly:
+`p { margin: 0 0 16px }` would put 16px under every paragraph, so paragraph margin is zeroed once in
+`@layer base`. Do not add `m-0` per element.
+
+**Layers and import order.** `theme.css` declares `@layer theme, base, components, utilities`. Compiled
+Quasar CSS (`src/css/quasar.scss`), MapLibre's stylesheet and the font go into `base`; Tailwind
+utilities go into `utilities`. Layering is required because unlayered CSS beats every layer, and Quasar
+uses the same class names as Tailwind (`.flex`, `.absolute`, `.hidden`, `.items-center`, ...). An
+unlayered `.flex` also adds `flex-wrap: wrap`, which silently defeats `flex-nowrap`.
+
+`main.ts` must import `./css/quasar.scss` before `./theme.css`. Both sit in `base`, and at equal
+specificity the later rule wins, so the base block in `theme.css` overrides Quasar's `body` typography.
+
+**Collision boundaries.** 79 class names exist in both Quasar and Tailwind. 56 of them are resolved by
+layering. The other 23 carry `!important` in Quasar and cannot be overridden from Tailwind:
+- `text-*` and `bg-*` for `dark primary secondary warning white black transparent`
+- `cursor-pointer`, `cursor-not-allowed`, `cursor-none`
+- `block`, `inline-block`, `hidden`, `invisible`, `overflow-auto`, `overflow-hidden`
+
+Treat these as Quasar's. Their values match Tailwind's because both come from the same chain, but a
+local override will not win.
+
+Never use `rotate-*`, `col-*` or `order-*`. Quasar applies `transform: rotate` and a 12-column flex
+grid; Tailwind sets different properties for the same effect, and both declarations apply and add up
+(measured: 45° + 45°).
+
+Quasar marks `QRadio`, `QToggle`, `QChip`, `QFab` and `QRating` with `row inline` / `column inline` /
+`flex inline`. Its `display: inline-flex` rule sits in `base`, so Tailwind's `.inline` in `utilities`
+wins by layer and collapses those controls to `display: inline`. `theme.css` re-asserts the rule in the
+`utilities` layer, mirroring Quasar's selector rather than listing components.
+
+**Safe area.** Quasar's `--q-safe-area-inset-*` properties are declared only under
+`body.q-safe-area-padding` / `body.q-ios-padding`, which this app does not set. A `var()` on an
+undefined custom property makes the whole declaration `unset`, not a fallback. Use
+`env(safe-area-inset-*, 0px)` with an explicit fallback. The global `.q-header` rule in `theme.css`
+applies it to every header.
+
+**Map container.** The map uses `absolute inset-0`, not `h-full`. Quasar gives `q-page` only a
+`min-height`, so a percentage height resolves to `auto` and the container collapses. The MapLibre
+attribution control is skinned in a scoped `<style>` block in `MapView.vue`, using `:deep(.maplibregl-*)`
+selectors only. Scoped styles are unlayered and would beat utilities if written on app classes, so
+keep class selectors out of that block.
+
+**Components in `src/components/ui/`.** Three wrappers; the budget of three is used up.
+- `AppScreen`: shell of the five auth screens. Lockup above the card, screen title inside the card
+  (`data-screen-title`), optional `footer` slot.
+- `AppNotice`: every in-page message. Props `variant` (`danger` | `warning` | `info`) and `role`
+  (`alert` | `status`, required). Colour is a tint behind dark ink, so the message does not depend on
+  the icon or the hue for contrast.
+- `AppLogo`: typographic "trippie" lockup. Replacing it with an image touches only this file.
+
+Everything else uses Quasar components directly.
+
+**Reference: `/style`.** Dev-only gallery (`import.meta.env.DEV`, dynamic import, absent from the
+production bundle, verified). It shows tokens, type scale, button and field states, notices and the
+POI palette. It is the reference for the system: a new pattern is added there, not to a separate design
+document. Reachable only while signed out, as the `guestOnly` routes are.
+
+**POI layer colours.** MapLibre takes paint values as style, not CSS. `src/lib/poiLayer.ts` therefore
+holds only the names of the `--app-poi-*` properties. It reads their values once per map through
+`getComputedStyle` and builds the colour expression. The palette itself lives in `theme.css` next to
+every other colour, so a dark theme redefines it the same way.
+
+**Dark mode.** Not implemented. The extension point is the semantic layer and the `--app-poi-*` set.
 
 ## Components
 
 | Component | Stack | Responsibility |
 |-----------|-------|----------------|
-| Web app | Vue 3 + Ionic + Tailwind v4 + MapLibre GL | UI, geolocation, map with locked/unlocked POIs, proximity unlock, category + content-mode selection, text display + audio playback, settings, status polling. |
+| Web app | Vue 3 + Quasar + Tailwind v4 + MapLibre GL | UI, geolocation, map with locked/unlocked POIs, proximity unlock, category + content-mode selection, text display + audio playback, settings, status polling. |
 | Tile server | tileserver (OSM mbtiles/pbf) | Serves self-hosted vector tiles. |
 | API Gateway | Spring Cloud Gateway | Single entry point; **local** access-JWT validation (JWKS from auth); denylist check; routing to services. |
 | Auth service | Spring Boot | User accounts, access/refresh token issuance + rotation, JWKS, per-user settings (default content mode, selected POI categories). Owns `auth_db`. |

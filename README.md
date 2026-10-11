@@ -4,17 +4,18 @@ Location-aware app that turns the space around you into a self-guided tour. Disc
 of interest (artworks, monuments, landmarks) from OpenStreetMap near your position, shows them
 on a map, and (once unlocked by approach) generates AI-guided descriptions (text + narrated audio).
 
-**Status: M2 (auth slice) implemented, awaiting its manual E2E gate.** M0 (skeleton) and M1
-(POI discovery) are closed. M2 adds accounts, OTP email verification, password recovery,
-per-user settings, and turns discovery into an authenticated feature. Content generation
-(M4/M5) and proximity unlock (M3) are not started.
+**Status: M2.5 (gui on Quasar + design system) through its E2E gate.** M0 (skeleton), M1 (POI
+discovery) and M2 (auth) are closed. M2 added accounts, OTP email verification, password
+recovery, per-user settings, and turned discovery into an authenticated feature; M2.5 replaced
+Ionic with Quasar and froze a design system across every screen. Content generation (M4/M5) and
+proximity unlock (M3) are not started.
 See `docs/ARCHITECTURE.md` for the target system, and `docs/flows/` for per-flow sequence diagrams.
 
 ## Modules
 
 | Path                      | Stack                                  | Status                       |
 |---------------------------|----------------------------------------|------------------------------|
-| `submodules/gui`          | Vue 3 + Ionic 8 + Tailwind v4 + MapLibre GL | Map with categorized POI markers; register / verify / login / forgot / reset-password screens, settings, route guard. Functional only — no visual polish yet. |
+| `submodules/gui`          | Vue 3 + Quasar 2 + Tailwind v4 + MapLibre GL | Map with categorized POI markers; register / verify / login / forgot / reset-password screens, settings, route guard. One design system (tokens in `src/css/quasar.variables.scss` and `src/theme.css`); see `docs/ARCHITECTURE.md` "On styling". |
 | `submodules/spatial`      | Java 21 + Spring Boot                  | `GET /locations/nearby` over PostGIS (JdbcClient + native SQL), distance-sorted, category-filtered. |
 | `submodules/gateway`      | Spring Cloud Gateway 5.0.0             | Routes `/api/spatial/**` and `/api/auth/**`; reactive OAuth2 resource server validating ES256 locally against auth's JWKS, plus a Redis `jti` denylist. |
 | `submodules/commons`      | Java (Gradle composite build)          | Shared backend utilities, consumed at source. |
@@ -157,11 +158,8 @@ Log in first (do this before stopping auth), then click **Wyloguj**. Within 5 se
 must land on `/login` and show the notice that the previous logout was not confirmed by the
 server. Then:
 
-(The double-submit block used to be checked here by hammering the button, because under Ionic
-`trigger('click')` fired the handler even on a disabled control and no unit test could pin it.
-Quasar renders a native `<button disabled>`, so `doubleSubmit.spec.ts` and `LogoutButton.spec.ts`
-now pin it and the manual step was retired in M2.5-09 — verified live one last time there: six
-real clicks during a hung request produced exactly one logout leg.)
+(Double-submit blocking is not a manual step. `doubleSubmit.spec.ts` and `LogoutButton.spec.ts`
+pin it against the native `disabled` attribute that Quasar's button renders.)
 
 ```bash
 docker start trippie-auth

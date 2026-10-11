@@ -185,8 +185,8 @@ const brand = [
   { token: 'primary', note: 'action, carries white text (5.13:1)', class: 'bg-primary text-ink-inverse' },
   { token: 'secondary', note: 'decorative accent only, never text', class: 'bg-secondary text-dark' },
   { token: 'tint-brand', note: 'informational surface', class: 'bg-tint-brand text-primary' },
-  { token: 'danger', note: 'error text (5.17:1 on white)', class: 'bg-tint-danger text-danger' },
-  { token: 'warning', note: 'warning text (6.38:1 on white)', class: 'bg-tint-warning text-warning' },
+  { token: 'danger', note: 'error text on its tint (4.92:1)', class: 'bg-tint-danger text-danger' },
+  { token: 'warning', note: 'warning text on its tint (5.95:1)', class: 'bg-tint-warning text-warning' },
   { token: 'success', note: 'confirmation', class: 'bg-surface text-success' },
 ]
 </script>

@@ -44,7 +44,7 @@ skinparam arrow {
 ' --- Components ---
 
 package "Client Side" {
-    [Web App (Vue 3 + Ionic)] as UI
+    [Web App (Vue 3 + Quasar)] as UI
     [MapLibre GL Engine] as Maps
     note bottom of UI : Web-first. Capacitor\nnative wrapper = [LATER]\nPOIs locked until user\nis within unlock radius.\nContent mode: TEXT / AUDIO / BOTH
 }
