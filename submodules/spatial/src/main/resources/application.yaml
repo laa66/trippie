@@ -12,6 +12,14 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# Outbound dependency on auth, read once per unlock write and never on the read path. The URI is
+# the only tunable here; the request timeout is a constant in SpatialConfig, which says why.
+trippie:
+  auth:
+    # Service root inside the compose network: the gateway's StripPrefix=2 applies only to
+    # traffic entering from outside, so the path on this client is plainly /settings.
+    uri: ${AUTH_URI:http://auth:8080}
+
 management:
   endpoints:
     web:

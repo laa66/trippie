@@ -135,6 +135,14 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/spatial_db
       SPRING_DATASOURCE_USERNAME: trippie
       SPRING_DATASOURCE_PASSWORD: trippie
+      # M3: spatial reads requireProximity from auth on the unlock write path only. Same value
+      # the gateway uses; StripPrefix=2 is a gateway rule, so this client calls /settings.
+      AUTH_URI: http://auth:8080
+    # Deliberately NOT depends_on: auth. The auth call is fail-closed and only on the rare unlock
+    # write, so waiting for auth to be healthy would serialise boot for no correctness gain — and
+    # worse, it would hold back spatial's entire read path (nearby, i.e. the whole map) on the
+    # health of a service that path never touches. No cycle exists either way; auth never calls
+    # spatial.
     depends_on:
       postgres:
         condition: service_healthy
