@@ -7,24 +7,68 @@ export const POI_SOURCE_ID = 'nearby-pois'
 export const POI_LAYER_ID = 'nearby-pois-circles'
 
 /**
- * Per-category circle colour: distinct hues spread across the wheel so the 8
- * categories stay separable on the basemap. Keyed by the frozen slug contract,
- * so the compiler already forces every slug present; the builder's runtime guard
- * turns a future drift (a slug with no colour) into a loud failure.
+ * The POI palette is NOT held here. MapLibre takes paint colours as style values rather than CSS,
+ * so this module cannot write `var(--...)` into the layer — but hard-coding hexes would also put
+ * the map outside the design system and out of reach of the planned dark theme. The compromise:
+ * the only thing this file owns is the NAME of each custom property; the values live beside every
+ * other colour in `src/theme.css`, and are read off the document once, when the layer is built.
+ *
+ * Keyed by the frozen slug contract, so the compiler forces every slug to name a property.
  */
-export const CATEGORY_COLORS: Record<CategorySlug, string> = {
-  public_art: '#dc2626',
-  monuments: '#ea580c',
-  heritage: '#ca8a04',
-  sacred: '#7c3aed',
-  museums: '#2563eb',
-  viewpoints: '#16a34a',
-  architecture: '#0891b2',
-  attractions: '#db2777',
+const CATEGORY_COLOR_PROPERTIES: Record<CategorySlug, string> = {
+  public_art: '--app-poi-public-art',
+  monuments: '--app-poi-monuments',
+  heritage: '--app-poi-heritage',
+  sacred: '--app-poi-sacred',
+  museums: '--app-poi-museums',
+  viewpoints: '--app-poi-viewpoints',
+  architecture: '--app-poi-architecture',
+  attractions: '--app-poi-attractions',
 }
 
-/** Fallback for a feature whose category is not one of the 8 slugs — the DB CHECK makes this unreachable. */
-export const UNKNOWN_CATEGORY_COLOR = '#6b7280'
+/** Colour of a feature whose category is not one of the 8 slugs — the DB CHECK makes this unreachable. */
+export const UNKNOWN_CATEGORY_PROPERTY = '--app-poi-unknown'
+/** Ring drawn around every circle; it is what separates a dot from the basemap underneath it. */
+export const STROKE_COLOR_PROPERTY = '--app-poi-stroke'
+
+export interface PoiPalette {
+  categories: Record<CategorySlug, string>
+  unknown: string
+  stroke: string
+}
+
+/** Every custom property the layer needs, in one list, so a caller can check them all at once. */
+export const POI_COLOR_PROPERTIES: readonly string[] = [
+  ...Object.values(CATEGORY_COLOR_PROPERTIES),
+  UNKNOWN_CATEGORY_PROPERTY,
+  STROKE_COLOR_PROPERTY,
+]
+
+/**
+ * Resolves the palette off the document's computed style. Called once per map (the layer is added
+ * once and never re-added), so this costs a single style resolution for the whole session: no
+ * listener, no subscription, nothing to tear down, and nothing on the render path.
+ *
+ * Empty means the property is not defined, which MapLibre would accept as a broken paint value and
+ * render as invisible POIs — so it throws instead.
+ */
+export function readPoiPalette(root: Element = document.documentElement): PoiPalette {
+  const computed = getComputedStyle(root)
+  const read = (property: string): string => {
+    const value = computed.getPropertyValue(property).trim()
+    if (value === '') {
+      throw new Error(`readPoiPalette: CSS custom property "${property}" is not defined`)
+    }
+    return value
+  }
+
+  const categories = {} as Record<CategorySlug, string>
+  for (const slug of CATEGORY_SLUGS) {
+    categories[slug] = read(CATEGORY_COLOR_PROPERTIES[slug])
+  }
+
+  return { categories, unknown: read(UNKNOWN_CATEGORY_PROPERTY), stroke: read(STROKE_COLOR_PROPERTY) }
+}
 
 /**
  * A MapLibre `match` expression on the `category` feature property. Built by
@@ -33,7 +77,7 @@ export const UNKNOWN_CATEGORY_COLOR = '#6b7280'
  */
 export function buildCategoryColorExpression(
   colors: Partial<Record<CategorySlug, string>>,
-  fallback: string = UNKNOWN_CATEGORY_COLOR,
+  fallback: string,
 ): ExpressionSpecification {
   const branches: string[] = []
   for (const slug of CATEGORY_SLUGS) {
@@ -48,21 +92,25 @@ export function buildCategoryColorExpression(
   return ['match', ['get', 'category'], ...branches, fallback] as unknown as ExpressionSpecification
 }
 
-export function categoryColorExpression(): ExpressionSpecification {
-  return buildCategoryColorExpression(CATEGORY_COLORS)
+export function categoryColorExpression(palette: PoiPalette): ExpressionSpecification {
+  return buildCategoryColorExpression(palette.categories, palette.unknown)
 }
 
-/** The single category-styled circle layer. One layer, one source — never per-POI markers. */
-export function nearbyPoiLayer(): CircleLayerSpecification {
+/**
+ * The single category-styled circle layer. One layer, one source — never per-POI markers.
+ * The palette defaults to the document's, which is the only thing the composable ever passes;
+ * taking it as an argument is what keeps this function pure and testable without a stylesheet.
+ */
+export function nearbyPoiLayer(palette: PoiPalette = readPoiPalette()): CircleLayerSpecification {
   return {
     id: POI_LAYER_ID,
     type: 'circle',
     source: POI_SOURCE_ID,
     paint: {
       'circle-radius': 6,
-      'circle-color': categoryColorExpression(),
+      'circle-color': categoryColorExpression(palette),
       'circle-stroke-width': 2,
-      'circle-stroke-color': '#ffffff',
+      'circle-stroke-color': palette.stroke,
     },
   }
 }

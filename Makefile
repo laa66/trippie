@@ -1,4 +1,4 @@
-.PHONY: build up down tiles load-pois auth-keys unit-test int-test test
+.PHONY: build up down down-hard tiles load-pois auth-keys unit-test int-test test
 
 COMPOSE := docker compose -f infra/docker-compose.yml
 MBTILES := infra/tiles/wroclaw.mbtiles
@@ -20,7 +20,16 @@ up:
 
 # -v also removes the named volumes (postgres-data, rabbitmq-data). Top-level
 # volumes are removed regardless of which profile (if any) their service is in.
+# Stop the stack and KEEP the data. The volumes hold the POIs (a few minutes of public
+# overpass-api.de, which also rate-limits with 504s) and the accounts, so wiping them is a
+# separate, deliberate command - `make down` used to carry -v and cost us the POI set three
+# times during M2.5.
 down:
+	$(COMPOSE) down
+
+# Full reset: also drops the named volumes (POIs, accounts, redis state). After this you need
+# `make up && make load-pois` again.
+down-hard:
 	$(COMPOSE) down -v
 
 # --- M0-06: self-hosted tiles seed --------------------------------------------
@@ -89,11 +98,15 @@ auth-keys:
 # (docker compose up). Test caching is bypassed for int-test (Gradle upToDateWhen, go -count=1).
 .NOTPARALLEL:
 
+# --rerun on the Java modules: without it a warm Gradle cache reports `unitTest UP-TO-DATE` and
+# the target goes green WITHOUT RUNNING ANYTHING, which is the difference between "green" and
+# "verified" for a gate (caught in the M2.5-09 gate). int-test bypasses the cache its own way,
+# through `outputs.upToDateWhen { false }` in each build.gradle.kts.
 unit-test:
-	( cd submodules/commons && ./gradlew unitTest )
-	( cd submodules/spatial && ./gradlew unitTest )
-	( cd submodules/gateway && ./gradlew unitTest )
-	( cd submodules/auth && ./gradlew unitTest )
+	( cd submodules/commons && ./gradlew unitTest --rerun )
+	( cd submodules/spatial && ./gradlew unitTest --rerun )
+	( cd submodules/gateway && ./gradlew unitTest --rerun )
+	( cd submodules/auth && ./gradlew unitTest --rerun )
 	( cd submodules/spatial-loader && go test -short ./... )
 	( cd submodules/gui && npm test )
 

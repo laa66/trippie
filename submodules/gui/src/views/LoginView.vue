@@ -36,8 +36,8 @@
       </q-btn>
     </div>
     <template #footer>
-      <q-btn flat no-caps dense color="primary" to="/register">Utwórz konto</q-btn>
-      <q-btn flat no-caps dense class="text-ink-muted" to="/forgot-password">Nie pamiętam hasła</q-btn>
+      <q-btn flat no-caps color="primary" class="min-h-11 px-3" to="/register">Utwórz konto</q-btn>
+      <q-btn flat no-caps class="min-h-11 px-3 text-ink-muted" to="/forgot-password">Nie pamiętam hasła</q-btn>
     </template>
   </app-screen>
 </template>

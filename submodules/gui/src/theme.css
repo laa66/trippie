@@ -52,6 +52,44 @@
 
   --app-shadow-card: 0 1px 2px rgb(16 33 27 / 5%), 0 10px 28px -12px rgb(16 33 27 / 18%);
   --app-shadow-raised: 0 2px 6px rgb(16 33 27 / 8%), 0 14px 32px -14px rgb(16 33 27 / 22%);
+
+  /*
+   * POI MAP LAYER - one colour per category, plus the ring every dot carries.
+   *
+   * These are the only tokens here that are never used as a CSS class: MapLibre takes paint
+   * colours as style values, not CSS, so src/lib/poiLayer.ts reads them off this element once per
+   * map (getComputedStyle, no listener, nothing on the render path) and hands them to the layer.
+   * They live here anyway, with every other colour, for the reason the semantic layer exists at
+   * all: a dark theme redefines these eight the same way it redefines ink and surface, and
+   * poiLayer.ts owns no colour of its own. Declare a literal value, never `var(...)`: a custom
+   * property that forwards to another one is not resolved by jsdom's getComputedStyle, so the
+   * indirection would read back differently in a test than in a browser.
+   *
+   * Keep every one of them inside THIS `:root` block. src/test/setupQuasar.ts replays them into
+   * jsdom and refuses to start if any lives elsewhere, because a second block (a dark theme) would
+   * silently become the palette the whole suite asserts.
+   *
+   * Hues are spread around the wheel so the 8 stay separable (worst pair dE2000 14.4, measured),
+   * and every one of them clears 3:1 against the white ring that separates a dot from the basemap.
+   * Two values moved off the inherited Tailwind-600 set, both for a measured reason:
+   * `viewpoints` was #16a34a, a mid green sitting dE2000 16.4 from the brand green the
+   * user-location marker is painted in - closer to the one dot on the map that is NOT a POI than
+   * several categories are to each other. Lime pushes that to 23.9 and reads as outdoors just as
+   * well (vs heritage dE 28.1). `heritage` was #ca8a04, which measured 2.94:1 against its own
+   * ring - under the 3:1 floor for a graphical object; #b08000 is 3.54:1 at essentially the same
+   * hue, and separates from monuments slightly better than the old value did (dE 21.7 -> 24.2).
+   * Both thresholds are asserted in poiLayer.spec.ts, so neither is just a claim in a comment.
+   */
+  --app-poi-public-art: #dc2626;
+  --app-poi-monuments: #ea580c;
+  --app-poi-heritage: #b08000;
+  --app-poi-sacred: #7c3aed;
+  --app-poi-museums: #2563eb;
+  --app-poi-viewpoints: #65a30d;
+  --app-poi-architecture: #0891b2;
+  --app-poi-attractions: #db2777;
+  --app-poi-unknown: #6b7280;
+  --app-poi-stroke: #ffffff;
 }
 
 @theme {
@@ -106,6 +144,26 @@
 }
 
 @layer base {
+  /*
+   * P16 - SAFE AREA ON EVERY HEADER.
+   *
+   * A q-header is position:fixed at the top, so on a notched device the status-bar cut-out lands
+   * on top of its content. Quasar does ship a rule for this, but only inside
+   * `body.q-ios-padding` / `body.q-safe-area-padding`, which its Capacitor config sets and we do
+   * not - and it covers top/bottom only, never left/right. Worse, its `--q-safe-area-inset-*`
+   * custom properties are declared INSIDE those same body selectors, so reaching for them from a
+   * component makes the whole declaration compute to `unset` rather than fall back: a
+   * `bottom: var(--q-safe-area-inset-bottom)` measured as `bottom: auto` and moved an
+   * absolutely-positioned control to the top of the screen, with the build and the suite green.
+   * So: raw env() with an explicit 0px fallback, and here rather than per screen, because the
+   * next q-header must not have to remember. Every inset is 0 on a device without a cut-out.
+   */
+  .q-header {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
   /*
    * Quasar's reset sets `p { margin: 0 0 16px }`, and with Tailwind's preflight disabled nothing
    * undoes it: every paragraph we write silently carries 16px below it, so a notice padded 12px

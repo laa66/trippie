@@ -34,7 +34,7 @@
       </q-btn>
     </div>
     <template #footer>
-      <q-btn flat no-caps dense class="text-ink-muted" :disable="busy" @click="resend">Wyślij kod ponownie</q-btn>
+      <q-btn flat no-caps class="min-h-11 px-3 text-ink-muted" :disable="busy" @click="resend">Wyślij kod ponownie</q-btn>
     </template>
   </app-screen>
 </template>

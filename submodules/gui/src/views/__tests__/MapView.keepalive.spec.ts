@@ -214,8 +214,9 @@ describe('MapView under KeepAlive', () => {
     await wrapper.setProps({ showMap: false })
     // QDialog unmounts its portal only after the hide transition, so this polls instead of
     // asserting on the next tick.
+    // 5s, not 2s: measured at 1931ms under load against the old 2000ms limit.
     await vi.waitFor(() => expect(document.querySelectorAll('.q-dialog')).toHaveLength(0), {
-      timeout: 2000,
+      timeout: 5000,
     })
 
     wrapper.unmount()

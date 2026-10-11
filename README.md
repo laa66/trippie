@@ -49,8 +49,10 @@ make load-pois
 # Queries public overpass-api.de for the same Wrocław bbox as the tiles and upserts
 # the POIs. Idempotent — rerunning only refreshes rows.
 
-# 5. Tear down (-v also drops the named volumes, so POIs and accounts are gone)
+# 5. Tear down, keeping the data
 make down
+# ...or wipe the volumes too (POIs and accounts are gone, reload takes minutes)
+make down-hard
 ```
 
 **Single entry point:** The browser talks to **http://localhost:8080** only — the gui's nginx.
@@ -104,7 +106,7 @@ cd submodules/gui           && npm run build   # type-check + production build
 ## Manual verification — M2 auth slice
 
 Automated suites do not cover the browser end of the auth flows, so M2 closes on this
-walk-through. It assumes a clean database: `make down && make up && make load-pois`.
+walk-through. It assumes a clean database: `make down-hard && make up && make load-pois`.
 
 **1. Sign up and verify.** Open http://localhost:8080, register an account. The OTP is not
 emailed in dev — it is logged by the auth service:
@@ -153,10 +155,13 @@ docker stop trippie-auth
 
 Log in first (do this before stopping auth), then click **Wyloguj**. Within 5 seconds the app
 must land on `/login` and show the notice that the previous logout was not confirmed by the
-server. While that request hangs, **click Wyloguj repeatedly** — only one logout leg may
-actually start (the block is pinned in unit tests by `doubleSubmit.spec.ts` and
-`LogoutButton.spec.ts` on the native `<button disabled>` (P6); this step confirms it on the live
-stack, and its fate is the user's call in M2.5-09). Then:
+server. Then:
+
+(The double-submit block used to be checked here by hammering the button, because under Ionic
+`trigger('click')` fired the handler even on a disabled control and no unit test could pin it.
+Quasar renders a native `<button disabled>`, so `doubleSubmit.spec.ts` and `LogoutButton.spec.ts`
+now pin it and the manual step was retired in M2.5-09 — verified live one last time there: six
+real clicks during a hung request produced exactly one logout leg.)
 
 ```bash
 docker start trippie-auth

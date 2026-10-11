@@ -96,6 +96,40 @@
         </section>
 
         <section class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">POI map palette</h2>
+          <!-- The one token family that never becomes a CSS class: MapLibre takes paint colours as
+               style values, so src/lib/poiLayer.ts reads these off the document. They are listed
+               here because otherwise nothing in the app shows them side by side. -->
+          <div class="grid grid-cols-2 gap-2">
+            <div v-for="c in poiTokens" :key="c.token" class="flex items-center gap-2.5 text-xs text-ink">
+              <span class="poi-dot shrink-0" :style="{ background: `var(--app-poi-${c.token})` }" />
+              <span class="min-w-0">
+                <span class="block font-semibold">{{ c.label }}</span>
+                <span class="block text-ink-muted">--app-poi-{{ c.token }}</span>
+              </span>
+            </div>
+          </div>
+          <p class="text-xs text-ink-muted">
+            Ring = --app-poi-stroke, the same 2px white the map draws. Every dot clears 3:1 against
+            it; the closest pair is dE2000 14.4 and none comes nearer than 23.9 to the brand green
+            the user-location marker uses.
+          </p>
+        </section>
+
+        <section class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Map chrome</h2>
+          <!-- A notice floating over the map (MapView's geolocation banner) is the same AppNotice
+               the forms use, plus shadow-raised: the tint is opaque, so it stays readable over
+               tiles. The header, FAB and the MapLibre attribution pill are composed from the same
+               tokens inside MapView.vue and cannot be reproduced here without duplicating them. -->
+          <div class="rounded-card bg-sunken p-4">
+            <app-notice variant="warning" role="status" class="shadow-raised">
+              Brak zgody na lokalizację — pokazuję centrum Wrocławia.
+            </app-notice>
+          </div>
+        </section>
+
+        <section class="space-y-3">
           <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Shape &amp; elevation</h2>
           <div class="grid grid-cols-3 gap-2 text-center text-xs text-ink-muted">
             <div class="rounded-field border border-line p-4">radius-field</div>
@@ -127,6 +161,7 @@ import {
 } from 'quasar'
 import AppLogo from '@/components/ui/AppLogo.vue'
 import AppNotice from '@/components/ui/AppNotice.vue'
+import { CATEGORY_LABELS, CATEGORY_SLUGS } from '@/composables/useCategorySelection'
 
 // The canvas for M2.5-06: states that are awkward to reach on a live screen (a field in error, a
 // button mid-request) sit here side by side. Dev-only route, dynamically imported, so it never
@@ -140,6 +175,12 @@ const toggles = ref([
   { label: 'Włączony', on: true },
   { label: 'Wyłączony', on: false },
 ])
+// Derived from the slug contract, not retyped: the labels and the token names are the same list
+// the map uses, so adding a category cannot leave this gallery showing eight of nine.
+const poiTokens = [
+  ...CATEGORY_SLUGS.map((slug) => ({ token: slug.replace('_', '-'), label: CATEGORY_LABELS[slug] })),
+  { token: 'unknown', label: 'Fallback (unreachable)' },
+]
 const brand = [
   { token: 'primary', note: 'action, carries white text (5.13:1)', class: 'bg-primary text-ink-inverse' },
   { token: 'secondary', note: 'decorative accent only, never text', class: 'bg-secondary text-dark' },
@@ -149,3 +190,15 @@ const brand = [
   { token: 'success', note: 'confirmation', class: 'bg-surface text-success' },
 ]
 </script>
+
+<style scoped>
+/* The POI tokens are the only colours in the system with no utility class; the swatch reads the
+   one it is given straight off the custom property, so there is no literal and no second list. */
+.poi-dot {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--app-poi-stroke);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--app-shadow-card);
+}
+</style>

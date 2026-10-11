@@ -1,10 +1,16 @@
 <template>
   <q-layout view="hHh lpR fFf">
-    <q-header>
+    <!-- The notch insets live on `.q-header` in theme.css (P16), so every header gets them and
+         this one carries only its own elevation. QLayout re-measures the header when it grows and
+         offsets the page from it, so the map follows by itself. -->
+    <q-header class="shadow-raised">
       <q-toolbar>
-        <q-toolbar-title>Mapa</q-toolbar-title>
+        <q-toolbar-title class="text-xl font-semibold tracking-tight">Mapa</q-toolbar-title>
         <q-space />
-        <q-btn flat to="/settings" label="Ustawienia" />
+        <!-- `min-h-11` + `px-2` instead of `dense`: dense gives the narrow look by shrinking the
+             whole button, and Quasar's own default lands a flat text button at 36px - both
+             under the frozen 44px floor for a touch target. -->
+        <q-btn flat no-caps class="min-h-11 px-2" to="/settings" label="Ustawienia" />
         <logout-button />
         <attribution-info />
       </q-toolbar>
@@ -18,15 +24,22 @@
         <div ref="mapEl" class="absolute inset-0" />
         <div
           v-if="geoError"
-          class="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-dark shadow-md"
+          class="absolute inset-x-4 top-4 z-10 ml-[env(safe-area-inset-left,0px)] mr-[env(safe-area-inset-right,0px)] flex justify-center"
         >
-          {{ geoError }}
+          <!-- Same notice component as the form screens, deliberately: the message is the same
+               kind of thing (a non-blocking degraded state) and the tint it carries is opaque,
+               which is what makes it readable over map tiles. The shadow is what a floating
+               element needs and a notice inside a card does not. -->
+          <app-notice variant="warning" role="status" class="max-w-sm shadow-raised">
+            {{ geoError }}
+          </app-notice>
         </div>
         <q-page-sticky position="bottom-right" :offset="[16, 16]">
           <q-btn
             fab
             round
             color="primary"
+            class="shadow-raised mr-[env(safe-area-inset-right,0px)] mb-[env(safe-area-inset-bottom,0px)]"
             :icon="symRoundedTune"
             aria-label="Filtr kategorii"
             @click="isFilterOpen = true"
@@ -57,9 +70,27 @@ import { useGeolocation, WROCLAW_FALLBACK } from '@/composables/useGeolocation'
 import { useNearbyPois, type UseNearbyPois } from '@/composables/useNearbyPois'
 import { useNearbyPoiLayer, type UseNearbyPoiLayer } from '@/composables/useNearbyPoiLayer'
 import { tileStyleUrl } from '@/lib/tiles'
+import AppNotice from '@/components/ui/AppNotice.vue'
 import CategoryFilter from '@/components/CategoryFilter.vue'
 import AttributionInfo from '@/components/AttributionInfo.vue'
 import LogoutButton from '@/components/LogoutButton.vue'
+
+/**
+ * Basemap attribution (M1-12, a licence condition — not decoration).
+ *
+ * The tileserver's own TileJSON already carries the full, linked notice, and MapLibre's
+ * AttributionControl drops any entry that is a SUBSTRING of another one (a raw String.includes on
+ * the HTML). Our previous plain-text '© OpenMapTiles © OpenStreetMap contributors' was not a
+ * substring of the linked HTML the tileserver serves, so the control rendered both and the line
+ * read twice over. Supplying a substring instead keeps the safety net — if the tileserver ever
+ * stops declaring an attribution, this is still shown on its own — while the duplicate disappears
+ * the moment the source declares one. The failure mode if the tileserver changes its wording is a
+ * visible duplicate again, never a missing notice, which is the right way round for a legal
+ * requirement. The `&copy;` entity, not '©', is what makes it a substring; MapView.spec.ts pins
+ * the relation against the tileserver's exact string, because both the literal sign and a
+ * '… (ODbL)' suffix were measured rendering the attribution twice.
+ */
+const OSM_ATTRIBUTION = '&copy; OpenStreetMap contributors'
 
 // Load-bearing: App.vue's <keep-alive :include="['MapView']"> matches on the component name.
 defineOptions({ name: 'MapView' })
@@ -74,6 +105,9 @@ let firstFixDone = false
 
 const { position, isFallback, error: geoError, start, stop } = useGeolocation()
 
+// Built in JS because MapLibre takes a DOM element, not a template — but the colours still come
+// from the token layer (`bg-primary`, `border-ink-inverse`), so the marker re-themes with
+// everything else instead of pinning two literals inside a function.
 function createUserMarkerElement(): HTMLElement {
   const wrapper = document.createElement('div')
   wrapper.className = 'relative flex h-12 w-12 items-center justify-center'
@@ -82,7 +116,8 @@ function createUserMarkerElement(): HTMLElement {
   ring.className = 'absolute h-12 w-12 rounded-full border-4 border-primary opacity-0 animate-map-pulse'
 
   const core = document.createElement('div')
-  core.className = 'absolute z-10 h-6 w-6 rounded-full border-[3px] border-white bg-primary shadow-md'
+  core.className =
+    'absolute z-10 h-6 w-6 rounded-full border-[3px] border-ink-inverse bg-primary shadow-raised'
 
   wrapper.append(ring, core)
   return wrapper
@@ -100,7 +135,7 @@ onMounted(() => {
     zoom: 13,
     attributionControl: {
       compact: false,
-      customAttribution: '© OpenMapTiles © OpenStreetMap contributors',
+      customAttribution: OSM_ATTRIBUTION,
     },
   })
 
@@ -164,3 +199,49 @@ onUnmounted(() => {
   map = null
 })
 </script>
+
+<style scoped>
+/*
+ * MapLibre renders the attribution control itself, so it is the one piece of map chrome that
+ * cannot be dressed with utility classes. It is skinned here rather than in theme.css because it
+ * belongs to this screen only, and scoped (`:deep`) because the control is created inside the map
+ * container at runtime. Scoped styles are unlayered, so they beat maplibre's own stylesheet, which
+ * theme.css pins into @layer base.
+ *
+ * CAREFUL with what goes in here: unlayered also means this block outranks @layer utilities, so a
+ * rule written on a CLASS would silently beat Tailwind on this screen and nowhere else. Every
+ * selector below is a `.maplibregl-*` one the framework owns and we never write by hand.
+ *
+ * Every value is a token. The notice has to be legible on top of whatever tiles are underneath it,
+ * so the background is opaque surface rather than maplibre's translucent white: ink-muted on
+ * surface measures 5.65:1. 11px is below our caption step on purpose — it is a permanent legal
+ * line, not screen copy, and it has to stay on one line next to the FAB — so the ratio is what
+ * has to hold at that size, and it does.
+ */
+:deep(.maplibregl-ctrl-bottom-right) {
+  right: env(safe-area-inset-right, 0px);
+  bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:deep(.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib) {
+  /* 80px right = the 56px FAB plus its 16px offset and a little air, so the line never slides
+     underneath it; the remaining 302px is what the notice has to fit into on a 390px screen. */
+  margin: 0 80px 10px 8px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow-card);
+  color: var(--app-ink-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* The OSM copyright link is part of the required attribution, so it has to look like a link:
+   maplibre removes the underline and only restores it on :hover, which a touch device never
+   reaches, and the colour alone is the surrounding colour. */
+:deep(.maplibregl-ctrl-attrib a) {
+  color: var(--app-ink-muted);
+  text-decoration: underline;
+}
+</style>

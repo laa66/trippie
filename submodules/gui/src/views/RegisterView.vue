@@ -32,7 +32,7 @@
       </q-btn>
     </div>
     <template #footer>
-      <q-btn flat no-caps dense color="primary" to="/login">Mam już konto</q-btn>
+      <q-btn flat no-caps color="primary" class="min-h-11 px-3" to="/login">Mam już konto</q-btn>
     </template>
   </app-screen>
 </template>

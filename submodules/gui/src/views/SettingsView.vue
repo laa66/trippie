@@ -2,9 +2,9 @@
   <q-layout view="hHh lpR fFf">
     <q-header>
       <q-toolbar>
-        <q-toolbar-title>Ustawienia</q-toolbar-title>
+        <q-toolbar-title class="text-xl font-semibold tracking-tight">Ustawienia</q-toolbar-title>
         <q-space />
-        <q-btn flat no-caps to="/map">Mapa</q-btn>
+        <q-btn flat no-caps class="min-h-11 px-2" to="/map">Mapa</q-btn>
       </q-toolbar>
     </q-header>
     <q-page-container>
