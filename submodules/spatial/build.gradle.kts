@@ -39,6 +39,13 @@ dependencies {
 	// migration IT uses directly (it drives the Flyway API at test-compile).
 	testImplementation("org.flywaydb:flyway-core")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
+	// Hexagon direction + "the HTTP layer may not reach an outbound port", pinned as a test
+	// (ArchitectureTest) rather than left to review. Version is explicit because ArchUnit is not in
+	// the Spring Boot BOM, so dependency-management has nothing to say about it and an omitted
+	// version would simply fail to resolve. Plain `archunit`, not `archunit-junit5`: the rules are
+	// driven from ordinary @Test methods, which keeps the import visible to assertions instead of
+	// hidden behind a second JUnit engine.
+	testImplementation("com.tngtech.archunit:archunit:1.5.1")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

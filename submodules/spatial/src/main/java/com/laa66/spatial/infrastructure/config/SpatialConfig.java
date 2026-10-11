@@ -9,13 +9,18 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import com.laa66.spatial.domain.port.in.FindNearbyLocations;
+import com.laa66.spatial.domain.port.in.FindNearbyLocationsForUser;
+import com.laa66.spatial.domain.port.in.UnlockLocations;
 import com.laa66.spatial.domain.port.out.LocationRepository;
+import com.laa66.spatial.domain.port.out.UnlockRepository;
 import com.laa66.spatial.domain.port.out.UserPreferences;
+import com.laa66.spatial.domain.service.NearbyLocationsForUserService;
 import com.laa66.spatial.domain.service.NearbyLocationsService;
+import com.laa66.spatial.domain.service.UnlockLocationsService;
 import com.laa66.spatial.infrastructure.client.AuthUserPreferencesAdapter;
 
 /**
- * The module's single wiring point: it binds the framework-free domain service and the outbound
+ * The module's single wiring point: it binds the framework-free domain services and the outbound
  * HTTP adapter to Spring, keeping {@code @Configuration} knowledge and configuration placeholders
  * out of the domain and out of the adapters themselves.
  */
@@ -37,6 +42,32 @@ public class SpatialConfig {
 	@Bean
 	FindNearbyLocations findNearbyLocations(LocationRepository locationRepository) {
 		return new NearbyLocationsService(locationRepository);
+	}
+
+	/**
+	 * The read path the endpoint drives, assembled as two layers on purpose.
+	 *
+	 * <p>It takes the {@link FindNearbyLocations} <em>bean</em>, so M6's Redis cache decorator slots
+	 * in underneath this composition by replacing that one bean and nothing else has to change. That
+	 * layering is the whole workaround for the frozen cache key
+	 * {@code spatial:nearby:{geohash6}:{radiusBucket}:{sortedCategoryCsv}}, which has no user
+	 * dimension: everything cacheable stays inside the inner bean, and the per-user unlock
+	 * decoration happens out here, after the cache would have answered.
+	 */
+	@Bean
+	FindNearbyLocationsForUser findNearbyLocationsForUser(
+			FindNearbyLocations findNearbyLocations, UnlockRepository unlockRepository) {
+		return new NearbyLocationsForUserService(findNearbyLocations, unlockRepository);
+	}
+
+	/**
+	 * The write use case, composed of the two outbound ports it needs. This is the only wiring that
+	 * puts {@link UserPreferences} on a request path, and it is the write path — the nearby read path
+	 * is deliberately assembled without it.
+	 */
+	@Bean
+	UnlockLocations unlockLocations(UnlockRepository unlockRepository, UserPreferences userPreferences) {
+		return new UnlockLocationsService(unlockRepository, userPreferences);
 	}
 
 	/**

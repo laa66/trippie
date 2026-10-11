@@ -16,50 +16,52 @@ import com.laa66.spatial.domain.model.UnlockGrant;
 public interface UnlockRepository {
 
 	/**
-	 * Persists the grant idempotently and returns the {@code osm_id}s whose row this call actually
-	 * created; an id already unlocked for that user is absent from the result and is left as it
-	 * was, keeping its original {@code unlocked_at} and {@code source}.
+	 * Grants every requested POI that the grant's position actually reaches (or every one that
+	 * exists, when the grant is {@code EXEMPT}), idempotently, and returns the requested ids that
+	 * are unlocked for that user afterwards.
 	 *
-	 * <p><strong>This method performs NO geometric verification.</strong> It grants exactly what it
-	 * is handed, including {@code source = PROXIMITY}, without ever looking at a position, a
-	 * distance or a radius. The {@code ST_DWithin} gate is the responsibility of the calling query
-	 * — unlocking is defined as a geometric predicate, and that predicate lives nowhere in here.
-	 * The name is deliberately ugly so that every call site reads as a claim that the caller has
-	 * already proved proximity (or that the user is exempt from it).
+	 * <p><strong>The distance predicate is part of this statement, not of the caller.</strong>
+	 * Unlocking is defined as a geometric predicate, so the only implementation that can be trusted
+	 * is one where the gate and the insert are the same statement: a two-step "check, then write"
+	 * would be a write that any future refactor could reach without the check. {@code radiusMeters}
+	 * and the {@code EXEMPT} decision come from the application service, which owns the policy.
 	 *
-	 * <p>Consequently this method <strong>must never be wired onto an HTTP path</strong>, directly
-	 * or through a thin service. A controller that calls it in place of a proximity-gated query
-	 * mints {@code granted_by = 'PROXIMITY'} rows for which no proximity was ever measured; such
-	 * rows are indistinguishable from legitimate ones, nothing detects them, and there is no
-	 * re-lock, so they are permanent. An HTTP unlock must go through a query that carries the
-	 * {@code ST_DWithin} predicate itself.
+	 * <p><strong>Which is also what a caller is promising here.</strong> This method takes the radius
+	 * and the source as arguments, so it will grant whatever it is told to grant: a 50 km radius, or
+	 * {@code PROXIMITY} for a position nobody measured, yields rows indistinguishable from honest
+	 * ones, with no re-lock to take them back. {@code UnlockLocationsService} is the only legitimate
+	 * caller, and a second one is a decision to be reviewed, not a detail.
 	 *
-	 * <p>Existence of each POI is enforced by the foreign key, which makes the statement atomic in
-	 * the strict sense: a batch containing one unknown {@code osm_id} persists nothing at all. A
-	 * caller that needs an unknown id to be reported rather than to abort the batch must filter
-	 * against {@code location_point} in its own query instead.
+	 * <p><strong>Existence is enforced by a join against {@code location_point}, not by the foreign
+	 * key.</strong> The key rejects the statement rather than the row, so a batch carrying one
+	 * unknown {@code osm_id} would persist nothing at all; selecting the grant's rows out of
+	 * {@code location_point} instead makes an unknown id simply absent from the result, which is
+	 * what lets it be reported as {@code refused}. The FK stays as the schema-level backstop. The
+	 * same join de-duplicates: {@code location_point.osm_id} is a primary key, so a repeated id in
+	 * the request yields one row no matter how often it was asked for.
 	 *
-	 * <p>An empty {@code osmIds} is accepted and returns an empty set without a round trip's worth
-	 * of useful work; unlike {@link #findUnlocked} there is no early return, because no legitimate
-	 * caller reaches here with nothing to grant — the HTTP boundary rejects an empty {@code osmIds}
-	 * with 400, so the empty case is a bug upstream rather than a shape to optimise for.
+	 * <p><strong>The result is state, not a delta.</strong> An id already unlocked before this call
+	 * is in the returned set, because the HTTP contract puts an already-unlocked POI in
+	 * {@code unlocked} and reserves {@code refused} for "too far away, or no such POI". That
+	 * includes an already-unlocked POI the caller is now far away from: the row is a fact that was
+	 * established once and there is no re-lock, so distance cannot retract it.
 	 *
-	 * <p><strong>The returned set is a delta, not a state.</strong> {@code RETURNING} after
-	 * {@code ON CONFLICT DO NOTHING} yields only the rows this call created, so an id that was
-	 * already unlocked is missing from the result even though it <em>is</em> unlocked. A caller
-	 * that needs the full unlocked state has to compose it with {@link #findUnlocked}.
+	 * <p>Nothing is overwritten: the first grant is the fact, keeping its original
+	 * {@code unlocked_at} and {@code granted_by}. Re-granting from a different source must not
+	 * rewrite why or when a POI was unlocked, because that is the only record of how the row came to
+	 * exist.
 	 *
-	 * <p>That matters for the response contract fixed for the HTTP unlock endpoint: an
-	 * already-unlocked POI belongs in {@code unlocked}, and {@code refused} means strictly "too far
-	 * away, or no such POI" — the panel shows state, not the history of one request. So the naive
-	 * {@code refused = requested − grantWithoutProximityCheck(...)} is <strong>wrong</strong>: it
-	 * drops already-unlocked POIs into {@code refused}. The caller must either union the delta with
-	 * {@link #findUnlocked}, or switch to the no-op update idiom
-	 * ({@code DO UPDATE SET user_id = poi_unlock.user_id RETURNING osm_id}), which pulls conflicts
-	 * into {@code RETURNING} and so returns state directly. Note the trade: that idiom stops
-	 * tolerating a duplicate {@code osm_id} within one batch, which {@code DO NOTHING} accepts.
+	 * <p><strong>Concurrency.</strong> Two requests for the same {@code (userId, osmId)} — a retry
+	 * after a client timeout, two tabs, two devices — both report the POI as unlocked; the second one
+	 * waits for the first and reads its committed row. The one case the implementation cannot close
+	 * is a concurrent grant for a POI the asserted position does not itself reach, which may come
+	 * back {@code refused} until the next call. See {@code PostgisUnlockAdapter}'s {@code GRANT_SQL}
+	 * for the mechanics.
+	 *
+	 * <p>An empty {@code osmIds} is not a shape to optimise for — the HTTP boundary rejects it with
+	 * 400, so reaching here with nothing to grant is a bug upstream.
 	 */
-	Set<String> grantWithoutProximityCheck(UnlockGrant grant);
+	Set<String> grant(UnlockGrant grant);
 
 	/**
 	 * Returns the subset of {@code osmIds} already unlocked for {@code userId}. Scoped to one user
