@@ -37,6 +37,6 @@ public interface UserRepository {
 	/** Resolves the settings row for a user id (flow 06). Absent only on a deleted-user race. */
 	Optional<UserSettingsData> findSettings(UUID userId);
 
-	/** Upserts the mode + categories for an existing user and bumps {@code updated_at}. */
-	void updateSettings(UUID userId, ContentMode mode, List<String> categories);
+	/** Upserts the mode + categories + proximity flag for an existing user and bumps {@code updated_at}. */
+	void updateSettings(UUID userId, ContentMode mode, List<String> categories, boolean requireProximity);
 }

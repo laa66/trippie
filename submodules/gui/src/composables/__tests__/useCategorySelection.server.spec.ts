@@ -34,7 +34,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-async function setup(opts: { loggedIn: boolean; stored?: string[]; rawStored?: string; server?: { defaultContentMode: 'TEXT' | 'AUDIO' | 'BOTH'; selectedCategories: string[] } }) {
+async function setup(opts: { loggedIn: boolean; stored?: string[]; rawStored?: string; server?: { defaultContentMode: 'TEXT' | 'AUDIO' | 'BOTH'; selectedCategories: string[]; requireProximity: boolean } }) {
   vi.resetModules()
   const storage = mockLocalStorage(
     opts.rawStored !== undefined
@@ -46,7 +46,7 @@ async function setup(opts: { loggedIn: boolean; stored?: string[]; rawStored?: s
   const api = await import('@/lib/settingsApi')
   const store = await import('@/lib/authStore')
   vi.mocked(api.getSettings).mockResolvedValue(
-    opts.server ?? { defaultContentMode: 'BOTH', selectedCategories: ['museums', 'monuments'] },
+    opts.server ?? { defaultContentMode: 'BOTH', selectedCategories: ['museums', 'monuments'], requireProximity: true },
   )
   if (opts.loggedIn) store.setAccessToken('jwt')
   const { useCategorySelection } = await import('@/composables/useCategorySelection')
@@ -61,11 +61,12 @@ describe('useCategorySelection (server-backed)', () => {
   it('hydrates selected and content mode from GET /settings when already logged in', async () => {
     const { sel, api } = await setup({
       loggedIn: true,
-      server: { defaultContentMode: 'AUDIO', selectedCategories: ['museums'] },
+      server: { defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: false },
     })
     expect(api.getSettings).toHaveBeenCalledTimes(1)
     expect(sel.selected.value).toEqual(['museums'])
     expect(sel.defaultContentMode.value).toBe('AUDIO')
+    expect(sel.requireProximity.value).toBe(false)
   })
 
   it('hydrates when isAuthenticated flips true after a logged-out cold start (boot refresh / login)', async () => {
@@ -82,42 +83,42 @@ describe('useCategorySelection (server-backed)', () => {
 
   it('toggle PUTs the full settings body and applies the server response, not the optimistic value', async () => {
     const { sel, api } = await setup({ loggedIn: true })
-    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
 
     sel.toggle('museums')
     await flushPromises()
 
-    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] }, expect.anything())
+    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true }, expect.anything())
     expect(sel.selected.value).toEqual(['monuments'])
     expect(sel.error.value).toBeNull()
   })
 
   it('setContentMode PUTs the new mode with the current categories', async () => {
     const { sel, api } = await setup({ loggedIn: true })
-    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'] })
+    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'], requireProximity: true })
 
     sel.setContentMode('TEXT')
     await flushPromises()
 
-    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'] }, expect.anything())
+    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'], requireProximity: true }, expect.anything())
     expect(sel.defaultContentMode.value).toBe('TEXT')
   })
 
   it('updates local state optimistically, before the PUT settles', async () => {
     const { sel, api } = await setup({ loggedIn: true })
-    const d = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const d = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.putSettings).mockReturnValue(d.promise)
 
     sel.toggle('museums')
 
     expect(sel.selected.value).toEqual(['monuments'])
-    d.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    d.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
     await flushPromises()
   })
 
   it('never writes localStorage while logged in', async () => {
     const { sel, api, storage } = await setup({ loggedIn: true })
-    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
 
     sel.toggle('museums')
     await flushPromises()
@@ -153,6 +154,17 @@ describe('useCategorySelection (server-backed)', () => {
     expect(sel.error.value).toContain('Nie udało się zapisać')
   })
 
+  it('a failed requireProximity PUT reverts the flag', async () => {
+    const { sel, api } = await setup({ loggedIn: true })
+    vi.mocked(api.putSettings).mockRejectedValue(new Error('boom'))
+
+    sel.setRequireProximity(false)
+    await flushPromises()
+
+    expect(sel.requireProximity.value).toBe(true)
+    expect(sel.error.value).not.toBeNull()
+  })
+
   it('a failed content-mode PUT reverts the mode', async () => {
     const { sel, api } = await setup({ loggedIn: true })
     vi.mocked(api.putSettings).mockRejectedValue(new Error('boom'))
@@ -166,15 +178,15 @@ describe('useCategorySelection (server-backed)', () => {
 
   it('a stale PUT response does not override a newer toggle (latest wins)', async () => {
     const { sel, api } = await setup({ loggedIn: true })
-    const first = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
-    const second = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const first = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
+    const second = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.putSettings).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
 
     sel.toggle('museums')
     sel.toggle('monuments')
-    second.resolve({ defaultContentMode: 'BOTH', selectedCategories: [] })
+    second.resolve({ defaultContentMode: 'BOTH', selectedCategories: [], requireProximity: true })
     await flushPromises()
-    first.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    first.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
     await flushPromises()
 
     expect(sel.selected.value).toEqual([])
@@ -182,14 +194,14 @@ describe('useCategorySelection (server-backed)', () => {
 
   it('logout drops server state back to the localStorage fallback and ignores a late hydrate', async () => {
     const { sel, api, store } = await setup({ loggedIn: false, stored: ['sacred'] })
-    const d = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const d = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.getSettings).mockReturnValue(d.promise)
 
     store.setAccessToken('jwt')
     await flushPromises()
     store.clearSession()
     await flushPromises()
-    d.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['museums'] })
+    d.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: true })
     await flushPromises()
 
     expect(sel.selected.value).toEqual(['sacred'])
@@ -214,7 +226,7 @@ describe('useCategorySelection (server-backed)', () => {
     mockLocalStorage()
     const api = await import('@/lib/settingsApi')
     const store = await import('@/lib/authStore')
-    const d = deferred<{ defaultContentMode: 'AUDIO'; selectedCategories: string[] }>()
+    const d = deferred<{ defaultContentMode: 'AUDIO'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.getSettings).mockReturnValue(d.promise)
     store.setAccessToken('jwt')
     const { useCategorySelection } = await import('@/composables/useCategorySelection')
@@ -229,7 +241,7 @@ describe('useCategorySelection (server-backed)', () => {
     expect(sel.defaultContentMode.value).toBe('BOTH')
     expect(sel.error.value).not.toBeNull()
 
-    d.resolve({ defaultContentMode: 'AUDIO', selectedCategories: ['sacred', 'heritage'] })
+    d.resolve({ defaultContentMode: 'AUDIO', selectedCategories: ['sacred', 'heritage'], requireProximity: true })
     await flushPromises()
     expect(sel.selected.value).toEqual(['sacred', 'heritage'])
     expect(sel.defaultContentMode.value).toBe('AUDIO')
@@ -269,7 +281,7 @@ describe('useCategorySelection (server-backed)', () => {
   it('a refused toggle after a failed GET retries hydration once, sends no PUT, and the next toggle persists', async () => {
     const { api, sel } = await loggedInAfterFailedGet()
     expect(api.getSettings).toHaveBeenCalledTimes(1)
-    vi.mocked(api.getSettings).mockResolvedValue({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'] })
+    vi.mocked(api.getSettings).mockResolvedValue({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'], requireProximity: true })
     vi.mocked(api.putSettings).mockImplementation(async (s) => s)
 
     sel.toggle('sacred')
@@ -282,12 +294,12 @@ describe('useCategorySelection (server-backed)', () => {
 
     sel.toggle('museums')
     await flushPromises()
-    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['monuments'] }, expect.anything())
+    expect(api.putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['monuments'], requireProximity: true }, expect.anything())
   })
 
   it('a second refused toggle while the retry is in flight starts no additional GET', async () => {
     const { api, sel } = await loggedInAfterFailedGet()
-    const d = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const d = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.getSettings).mockReturnValue(d.promise)
 
     sel.toggle('sacred')
@@ -297,7 +309,7 @@ describe('useCategorySelection (server-backed)', () => {
 
     expect(api.getSettings).toHaveBeenCalledTimes(2)
     expect(api.putSettings).not.toHaveBeenCalled()
-    d.resolve({ defaultContentMode: 'BOTH', selectedCategories: ALL })
+    d.resolve({ defaultContentMode: 'BOTH', selectedCategories: ALL, requireProximity: true })
     await flushPromises()
   })
 
@@ -360,15 +372,15 @@ describe('useCategorySelection (server-backed)', () => {
 
   it('a stale echo of the first PUT never wins over a trailing change', async () => {
     const { sel, api } = await setup({ loggedIn: true })
-    const gates: ((v: { defaultContentMode: 'BOTH'; selectedCategories: string[] }) => void)[] = []
+    const gates: ((v: { defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }) => void)[] = []
     vi.mocked(api.putSettings).mockImplementation(() => new Promise((r) => gates.push(r)))
 
     sel.toggle('museums')
     sel.toggle('monuments')
-    gates[0]({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    gates[0]({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
     await flushPromises()
     expect(sel.selected.value).toEqual([])
-    gates[1]({ defaultContentMode: 'BOTH', selectedCategories: [] })
+    gates[1]({ defaultContentMode: 'BOTH', selectedCategories: [], requireProximity: true })
     await flushPromises()
     expect(sel.selected.value).toEqual([])
   })
@@ -377,7 +389,7 @@ describe('useCategorySelection (server-backed)', () => {
     const { sel, api, store } = await setup({
       loggedIn: true,
       stored: ['viewpoints'],
-      server: { defaultContentMode: 'AUDIO', selectedCategories: ['sacred'] },
+      server: { defaultContentMode: 'AUDIO', selectedCategories: ['sacred'], requireProximity: false },
     })
     expect(sel.selected.value).toEqual(['sacred'])
     store.clearSession()
@@ -392,6 +404,7 @@ describe('useCategorySelection (server-backed)', () => {
 
     expect(sel.selected.value).not.toEqual(['sacred'])
     expect(sel.defaultContentMode.value).toBe('BOTH')
+    expect(sel.requireProximity.value).toBe(true)
   })
 
   it('an echo equal to the optimistic value triggers exactly ONE nearby fetch per toggle', async () => {
@@ -409,7 +422,7 @@ describe('useCategorySelection (server-backed)', () => {
     const pois = useNearbyPois(map)
     await flushPromises()
     vi.mocked(fetchNearby).mockClear()
-    vi.mocked(api.putSettings).mockImplementation(async (s) => ({ ...s, selectedCategories: [...s.selectedCategories] }))
+    vi.mocked(api.putSettings).mockImplementation(async (s) => ({ ...s, selectedCategories: [...s.selectedCategories], requireProximity: true }))
 
     sel.toggle('museums')
     await flushPromises()
@@ -431,7 +444,7 @@ describe('useCategorySelection (server-backed)', () => {
       getBounds: () => ({ getNorthEast: () => ({ lng: 17, lat: 51.01 }) }),
     }
     const pois = useNearbyPois(map)
-    const pending = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const pending = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.putSettings).mockReturnValue(pending.promise)
 
     sel.toggle('museums')
@@ -440,14 +453,14 @@ describe('useCategorySelection (server-backed)', () => {
     const last = vi.mocked(fetchNearby).mock.calls.at(-1)![0]
     expect(last.categories).toEqual(['monuments'])
     pois.stop()
-    pending.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    pending.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
     await flushPromises()
   })
 
   it('a late GET of the previous session does not mark the new session hydrated (no PUT of un-hydrated state)', async () => {
     const { sel, api, store } = await setup({ loggedIn: false })
-    const a = deferred<{ defaultContentMode: 'AUDIO'; selectedCategories: string[] }>()
-    const b = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const a = deferred<{ defaultContentMode: 'AUDIO'; selectedCategories: string[]; requireProximity: boolean }>()
+    const b = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.getSettings).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
     store.setAccessToken('jwt-A')
     await flushPromises()
@@ -456,7 +469,7 @@ describe('useCategorySelection (server-backed)', () => {
     store.setAccessToken('jwt-B')
     await flushPromises()
 
-    a.resolve({ defaultContentMode: 'AUDIO', selectedCategories: ['sacred'] })
+    a.resolve({ defaultContentMode: 'AUDIO', selectedCategories: ['sacred'], requireProximity: true })
     await flushPromises()
     sel.toggle('museums')
     await flushPromises()
@@ -468,8 +481,8 @@ describe('useCategorySelection (server-backed)', () => {
 
   it('a late GET of the previous session does not clear hydrating of the new session (no duplicate GET)', async () => {
     const { sel, api, store } = await setup({ loggedIn: false })
-    const a = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
-    const b = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[] }>()
+    const a = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
+    const b = deferred<{ defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }>()
     vi.mocked(api.getSettings).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
     store.setAccessToken('jwt-A')
     await flushPromises()
@@ -484,13 +497,13 @@ describe('useCategorySelection (server-backed)', () => {
     await flushPromises()
 
     expect(api.getSettings).toHaveBeenCalledTimes(2)
-    b.resolve({ defaultContentMode: 'BOTH', selectedCategories: ALL })
+    b.resolve({ defaultContentMode: 'BOTH', selectedCategories: ALL, requireProximity: true })
     await flushPromises()
   })
 
   it('a late PUT of the previous session does not clear saving of the new session (no concurrent PUTs)', async () => {
     const { sel, api, store } = await setup({ loggedIn: true })
-    type S = { defaultContentMode: 'BOTH'; selectedCategories: string[] }
+    type S = { defaultContentMode: 'BOTH'; selectedCategories: string[]; requireProximity: boolean }
     const a = deferred<S>()
     const b = deferred<S>()
     vi.mocked(api.putSettings).mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise)
@@ -502,19 +515,19 @@ describe('useCategorySelection (server-backed)', () => {
     sel.toggle('monuments')
     expect(api.putSettings).toHaveBeenCalledTimes(2)
 
-    a.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'] })
+    a.resolve({ defaultContentMode: 'BOTH', selectedCategories: ['monuments'], requireProximity: true })
     await flushPromises()
     sel.toggle('sacred')
     await flushPromises()
 
     expect(api.putSettings).toHaveBeenCalledTimes(2)
-    b.resolve({ defaultContentMode: 'BOTH', selectedCategories: [] })
+    b.resolve({ defaultContentMode: 'BOTH', selectedCategories: [], requireProximity: true })
     await flushPromises()
   })
 
   it('treats [a, a] and [a, b] as different selections (server duplicates)', async () => {
-    const { sel, api } = await setup({ loggedIn: true, server: { defaultContentMode: 'BOTH', selectedCategories: ['museums', 'museums'] } })
-    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'] })
+    const { sel, api } = await setup({ loggedIn: true, server: { defaultContentMode: 'BOTH', selectedCategories: ['museums', 'museums'], requireProximity: true } })
+    vi.mocked(api.putSettings).mockResolvedValue({ defaultContentMode: 'TEXT', selectedCategories: ['museums', 'monuments'], requireProximity: true })
 
     sel.setContentMode('TEXT')
     await flushPromises()

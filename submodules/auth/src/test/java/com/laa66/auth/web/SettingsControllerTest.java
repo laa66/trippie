@@ -2,6 +2,7 @@ package com.laa66.auth.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -37,7 +38,7 @@ class SettingsControllerTest {
 
 	private static final UUID USER_ID = UUID.randomUUID();
 	private static final String VALID_BODY =
-			"{\"defaultContentMode\":\"TEXT\",\"selectedCategories\":[\"museums\",\"viewpoints\"]}";
+			"{\"defaultContentMode\":\"TEXT\",\"selectedCategories\":[\"museums\",\"viewpoints\"],\"requireProximity\":true}";
 
 	@Autowired
 	private MockMvc mvc;
@@ -51,7 +52,7 @@ class SettingsControllerTest {
 	@Test
 	void get_returnsMockedSettings() throws Exception {
 		when(getUserSettings.get(USER_ID)).thenReturn(
-				new UserSettingsData(ContentMode.BOTH, List.of("museums", "viewpoints")));
+				new UserSettingsData(ContentMode.BOTH, List.of("museums", "viewpoints"), true));
 
 		mvc.perform(get("/settings").header("X-User-Id", USER_ID.toString()))
 				.andExpect(status().isOk())
@@ -77,8 +78,8 @@ class SettingsControllerTest {
 
 	@Test
 	void put_validRequest_returns200_andCallsUseCaseWithHeaderUserId() throws Exception {
-		when(updateUserSettings.update(eq(USER_ID), any(), any())).thenReturn(
-				new UserSettingsData(ContentMode.TEXT, List.of("museums", "viewpoints")));
+		when(updateUserSettings.update(eq(USER_ID), any(), any(), anyBoolean())).thenReturn(
+				new UserSettingsData(ContentMode.TEXT, List.of("museums", "viewpoints"), true));
 
 		mvc.perform(put("/settings")
 				.header("X-User-Id", USER_ID.toString())
@@ -88,7 +89,7 @@ class SettingsControllerTest {
 				.andExpect(result -> assertThat(result.getResponse().getContentAsString())
 						.contains("\"defaultContentMode\":\"TEXT\""));
 
-		verify(updateUserSettings).update(USER_ID, ContentMode.TEXT, List.of("museums", "viewpoints"));
+		verify(updateUserSettings).update(USER_ID, ContentMode.TEXT, List.of("museums", "viewpoints"), true);
 	}
 
 	@Test
@@ -96,7 +97,7 @@ class SettingsControllerTest {
 		mvc.perform(put("/settings")
 				.header("X-User-Id", USER_ID.toString())
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"defaultContentMode\":\"TEXT\",\"selectedCategories\":[\"not-a-real-slug\"]}"))
+				.content("{\"defaultContentMode\":\"TEXT\",\"selectedCategories\":[\"not-a-real-slug\"],\"requireProximity\":true}"))
 				.andExpect(status().isBadRequest())
 				.andExpect(result -> assertThat(result.getResponse().getContentType())
 						.contains(MediaType.APPLICATION_PROBLEM_JSON_VALUE));
@@ -109,7 +110,7 @@ class SettingsControllerTest {
 		mvc.perform(put("/settings")
 				.header("X-User-Id", USER_ID.toString())
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"defaultContentMode\":\"LOUD\",\"selectedCategories\":[\"museums\"]}"))
+				.content("{\"defaultContentMode\":\"LOUD\",\"selectedCategories\":[\"museums\"],\"requireProximity\":true}"))
 				.andExpect(status().isBadRequest())
 				.andExpect(result -> assertThat(result.getResponse().getContentType())
 						.contains(MediaType.APPLICATION_PROBLEM_JSON_VALUE));
@@ -128,16 +129,54 @@ class SettingsControllerTest {
 	}
 
 	@Test
-	void put_emptyCategoryList_isValid() throws Exception {
-		when(updateUserSettings.update(eq(USER_ID), any(), any())).thenReturn(
-				new UserSettingsData(ContentMode.AUDIO, List.of()));
+	void get_returnsRequireProximity() throws Exception {
+		when(getUserSettings.get(USER_ID)).thenReturn(
+				new UserSettingsData(ContentMode.BOTH, List.of("museums"), false));
+
+		mvc.perform(get("/settings").header("X-User-Id", USER_ID.toString()))
+				.andExpect(status().isOk())
+				.andExpect(result -> assertThat(result.getResponse().getContentAsString())
+						.contains("\"requireProximity\":false"));
+	}
+
+	@Test
+	void put_requireProximityFalse_isPassedToUseCase_andEchoed() throws Exception {
+		when(updateUserSettings.update(eq(USER_ID), any(), any(), anyBoolean())).thenReturn(
+				new UserSettingsData(ContentMode.TEXT, List.of("museums"), false));
 
 		mvc.perform(put("/settings")
 				.header("X-User-Id", USER_ID.toString())
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"defaultContentMode\":\"AUDIO\",\"selectedCategories\":[]}"))
+				.content("{\"defaultContentMode\":\"TEXT\",\"selectedCategories\":[\"museums\"],\"requireProximity\":false}"))
+				.andExpect(status().isOk())
+				.andExpect(result -> assertThat(result.getResponse().getContentAsString())
+						.contains("\"requireProximity\":false"));
+
+		verify(updateUserSettings).update(USER_ID, ContentMode.TEXT, List.of("museums"), false);
+	}
+
+	@Test
+	void put_missingRequireProximity_returns400_andNeverCallsUseCase() throws Exception {
+		mvc.perform(put("/settings")
+				.header("X-User-Id", USER_ID.toString())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"defaultContentMode\":\"TEXT\",\"selectedCategories\":[\"museums\"]}"))
+				.andExpect(status().isBadRequest());
+
+		verifyNoInteractions(updateUserSettings);
+	}
+
+	@Test
+	void put_emptyCategoryList_isValid() throws Exception {
+		when(updateUserSettings.update(eq(USER_ID), any(), any(), anyBoolean())).thenReturn(
+				new UserSettingsData(ContentMode.AUDIO, List.of(), true));
+
+		mvc.perform(put("/settings")
+				.header("X-User-Id", USER_ID.toString())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"defaultContentMode\":\"AUDIO\",\"selectedCategories\":[],\"requireProximity\":true}"))
 				.andExpect(status().isOk());
 
-		verify(updateUserSettings).update(USER_ID, ContentMode.AUDIO, List.of());
+		verify(updateUserSettings).update(USER_ID, ContentMode.AUDIO, List.of(), true);
 	}
 }

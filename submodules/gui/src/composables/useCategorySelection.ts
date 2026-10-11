@@ -64,22 +64,30 @@ export interface UseCategorySelection {
   selected: Ref<CategorySlug[]>
   /** The user's default content mode (server-side setting; meaningful while logged in). */
   defaultContentMode: Ref<ContentMode>
+  /** Whether a POI unlocks only by physical approach (server-side setting; meaningful while logged in). */
+  requireProximity: Ref<boolean>
   /** Set when loading or saving settings failed; null otherwise. */
   error: Ref<string | null>
   isSelected: (slug: CategorySlug) => boolean
   toggle: (slug: CategorySlug) => void
   setContentMode: (mode: ContentMode) => void
+  setRequireProximity: (value: boolean) => void
 }
 
 // Module-scoped singleton state: the filter modal and the map must observe the same selection.
 const selected = ref<CategorySlug[]>(readStoredSelection())
 const defaultContentMode = ref<ContentMode>('BOTH')
+const requireProximity = ref(true)
 const error = ref<string | null>(null)
 
 const { isAuthenticated } = useAuthStore()
 
 // Last state the server confirmed; a failed save reverts to it so the UI never disagrees with the server.
-const DEFAULT_SETTINGS: UserSettings = { defaultContentMode: 'BOTH', selectedCategories: [...CATEGORY_SLUGS] }
+const DEFAULT_SETTINGS: UserSettings = {
+  defaultContentMode: 'BOTH',
+  selectedCategories: [...CATEGORY_SLUGS],
+  requireProximity: true,
+}
 let confirmed: UserSettings = DEFAULT_SETTINGS
 // True once GET /settings succeeded for the current session. Until then local state is only a fallback:
 // writing it would overwrite the user's real server settings.
@@ -106,6 +114,7 @@ function applyServer(settings: UserSettings): void {
     selected.value = slugs
   }
   defaultContentMode.value = settings.defaultContentMode
+  requireProximity.value = settings.requireProximity
 }
 
 async function hydrate(): Promise<void> {
@@ -146,6 +155,7 @@ watch(isAuthenticated, (authenticated) => {
   }
   selected.value = readStoredSelection()
   defaultContentMode.value = 'BOTH'
+  requireProximity.value = true
 })
 if (isAuthenticated.value) {
   void hydrate()
@@ -157,6 +167,7 @@ function revertToConfirmed(): void {
     selected.value = slugs
   }
   defaultContentMode.value = confirmed.defaultContentMode
+  requireProximity.value = confirmed.requireProximity
 }
 
 async function saveToServer(): Promise<void> {
@@ -171,7 +182,11 @@ async function saveToServer(): Promise<void> {
       dirty = false
       try {
         const stored = await putSettings(
-          { defaultContentMode: defaultContentMode.value, selectedCategories: [...selected.value] },
+          {
+            defaultContentMode: defaultContentMode.value,
+            selectedCategories: [...selected.value],
+            requireProximity: requireProximity.value,
+          },
           session.signal,
         )
         if (mine !== generation) return
@@ -235,11 +250,20 @@ function setContentMode(mode: ContentMode): void {
   }
 }
 
+/** Server-only setting like the content mode: no localStorage fallback, not persisted logged out. */
+function setRequireProximity(value: boolean): void {
+  if (!canWrite()) return
+  requireProximity.value = value
+  if (isAuthenticated.value) {
+    void saveToServer()
+  }
+}
+
 /**
  * App-wide selected-category state. Logged in: the server (`/api/auth/settings`) is the source of
  * truth. Logged out: localStorage fallback, validated on read — all 8 categories when storage is
  * absent, corrupt, or contains an unknown slug.
  */
 export function useCategorySelection(): UseCategorySelection {
-  return { selected, defaultContentMode, error, isSelected, toggle, setContentMode }
+  return { selected, defaultContentMode, requireProximity, error, isSelected, toggle, setContentMode, setRequireProximity }
 }

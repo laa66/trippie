@@ -3,9 +3,6 @@ package com.laa66.spatial.infrastructure.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import java.sql.Array;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.util.List;
 import java.util.Set;
 
@@ -58,7 +55,10 @@ class NearbyLocationsIntegrationTest extends AbstractPostgisIntegrationTest {
 	@BeforeEach
 	void resetTable() {
 		jdbc = JdbcClient.create(dataSource);
-		jdbc.sql("TRUNCATE location_point").update();
+		// poi_unlock listed explicitly, not CASCADE: location_point can no longer be truncated
+		// alone (V2 references it), and a future third referencing table should fail here loudly
+		// rather than be wiped silently.
+		jdbc.sql("TRUNCATE poi_unlock, location_point").update();
 	}
 
 	@Test
@@ -195,13 +195,7 @@ class NearbyLocationsIntegrationTest extends AbstractPostgisIntegrationTest {
 				.update();
 	}
 
-	private Array allCategoriesArray() {
-		String[] slugs = java.util.Arrays.stream(Category.values()).map(Category::slug).toArray(String[]::new);
-		try (Connection connection = dataSource.getConnection()) {
-			return connection.createArrayOf("text", slugs);
-		}
-		catch (SQLException ex) {
-			throw new IllegalStateException(ex);
-		}
+	private String[] allCategoriesArray() {
+		return java.util.Arrays.stream(Category.values()).map(Category::slug).toArray(String[]::new);
 	}
 }

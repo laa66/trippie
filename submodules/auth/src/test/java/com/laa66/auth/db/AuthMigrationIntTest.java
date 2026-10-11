@@ -94,14 +94,11 @@ class AuthMigrationIntTest extends AbstractPostgresIntegrationTest {
 	}
 
 	@Test
-	void v1AppliesOnACleanDatabase() {
+	void migrationsApplyInOrderOnACleanDatabase() {
 		assertThat(migrateResult.success).isTrue();
-		assertThat(migrateResult.migrations)
-				.singleElement()
-				.satisfies(migration -> {
-					assertThat(migration.version).isEqualTo("1");
-					assertThat(migration.description).isEqualTo("auth");
-				});
+		assertThat(migrateResult.migrations).extracting(m -> m.version + ":" + m.description)
+				.startsWith("1:auth", "2:user settings require proximity");
+		assertThat(migrateResult.migrations).extracting(m -> Integer.parseInt(m.version)).isSorted();
 	}
 
 	// --- app_user -----------------------------------------------------------------------------
@@ -178,7 +175,7 @@ class AuthMigrationIntTest extends AbstractPostgresIntegrationTest {
 	@Test
 	void userSettingsCarriesOnlyTheDedicatedColumns() throws SQLException {
 		assertThat(columnNames("user_settings")).containsExactlyInAnyOrder(
-				"user_id", "default_content_mode", "selected_categories", "updated_at");
+				"user_id", "default_content_mode", "selected_categories", "updated_at", "require_proximity");
 	}
 
 	@Test
@@ -249,6 +246,16 @@ class AuthMigrationIntTest extends AbstractPostgresIntegrationTest {
 		UUID bad = insertUser("bad@example.com");
 		assertRejected(() -> insertSettings(bad, "BOTH", List.of("restaurants")));
 		assertRejected(() -> insertSettings(bad, "BOTH", List.of("museums", "restaurants")));
+	}
+
+	@Test
+	void requireProximityIsNotNullAndDefaultsToTrue() throws SQLException {
+		assertThat(nullability("user_settings", "require_proximity")).isEqualTo("NO");
+
+		UUID id = insertUser("proximity@example.com");
+		insertSettings(id, "BOTH", CATEGORY_SLUGS);
+		assertThat(query("SELECT require_proximity::text FROM user_settings WHERE user_id = '" + id + "'"))
+				.containsExactly("true");
 	}
 
 	@Test

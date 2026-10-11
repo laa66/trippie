@@ -54,6 +54,6 @@ describe('auth field contract', () => {
 
   it('Settings keeps its section headers', () => {
     const headers = mount(SettingsView).findAll('.q-item__label--header').map((h) => h.text())
-    expect(headers).toEqual(['Domyślny tryb treści', 'Kategorie'])
+    expect(headers).toEqual(['Domyślny tryb treści', 'Odblokowywanie miejsc', 'Kategorie'])
   })
 })

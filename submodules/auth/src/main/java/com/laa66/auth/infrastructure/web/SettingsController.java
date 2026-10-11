@@ -40,11 +40,11 @@ public class SettingsController {
 	public SettingsResponse update(@RequestHeader("X-User-Id") UUID userId,
 			@Valid @RequestBody UpdateSettingsRequest request) {
 		UserSettingsData updated = updateUserSettings.update(
-				userId, request.defaultContentMode(), request.selectedCategories());
+				userId, request.defaultContentMode(), request.selectedCategories(), request.requireProximity());
 		return toResponse(updated);
 	}
 
 	private static SettingsResponse toResponse(UserSettingsData data) {
-		return new SettingsResponse(data.defaultContentMode().name(), data.selectedCategories());
+		return new SettingsResponse(data.defaultContentMode().name(), data.selectedCategories(), data.requireProximity());
 	}
 }

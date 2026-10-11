@@ -95,15 +95,21 @@ class LocationPointMigrationIntTest extends AbstractPostgisIntegrationTest {
 		connection.rollback();
 	}
 
+	/**
+	 * V2 references location_point, so it can only follow V1. {@code startsWith} is itself an
+	 * ordered assertion and {@code isSorted} pins monotonicity, which together cover that
+	 * ordering fully; a later migration appended on top is not this test's business — the schema
+	 * shape assertions below catch an unknown migration that actually changed something.
+	 */
 	@Test
-	void v1AppliesOnACleanDatabase() {
+	void migrationsApplyInOrderOnACleanDatabase() {
 		assertThat(migrateResult.success).isTrue();
 		assertThat(migrateResult.migrations)
-				.singleElement()
-				.satisfies(migration -> {
-					assertThat(migration.version).isEqualTo("1");
-					assertThat(migration.description).isEqualTo("location point");
-				});
+				.extracting(migration -> migration.version + ":" + migration.description)
+				.startsWith("1:location point", "2:poi unlock");
+		assertThat(migrateResult.migrations)
+				.extracting(migration -> Integer.parseInt(migration.version))
+				.isSorted();
 	}
 
 	@Test

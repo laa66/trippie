@@ -14,5 +14,6 @@ import jakarta.validation.constraints.NotNull;
  */
 record UpdateSettingsRequest(
 		@NotNull ContentMode defaultContentMode,
-		@NotNull @CategorySlugs List<String> selectedCategories) {
+		@NotNull @CategorySlugs List<String> selectedCategories,
+		@NotNull Boolean requireProximity) {
 }

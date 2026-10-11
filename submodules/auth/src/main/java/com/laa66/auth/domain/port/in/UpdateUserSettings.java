@@ -12,5 +12,5 @@ import com.laa66.auth.domain.model.UserSettingsData;
  */
 public interface UpdateUserSettings {
 
-	UserSettingsData update(UUID userId, ContentMode mode, List<String> categories);
+	UserSettingsData update(UUID userId, ContentMode mode, List<String> categories, boolean requireProximity);
 }

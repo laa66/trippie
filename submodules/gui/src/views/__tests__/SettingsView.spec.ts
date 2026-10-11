@@ -19,7 +19,7 @@ beforeEach(() => {
 
 describe('SettingsView', () => {
   it('shows server settings and writes a category toggle through PUT', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'AUDIO', selectedCategories: ['museums'] })
+    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true })
     vi.mocked(putSettings).mockImplementation(async (s) => s)
     setAccessToken('jwt')
     await flushPromises()
@@ -28,17 +28,17 @@ describe('SettingsView', () => {
     expect(wrapper.findComponent(QOptionGroup).props('modelValue')).toBe('AUDIO')
     expect(wrapper.findAll('.q-radio')).toHaveLength(3)
     expect(wrapper.findAll('.q-radio').map((r) => r.text())).toEqual(['Tekst', 'Audio', 'Tekst i audio'])
-    const toggles = wrapper.findAllComponents(QToggle)
+    const [, ...toggles] = wrapper.findAllComponents(QToggle)
     expect(toggles).toHaveLength(8)
     expect(toggles.filter((t) => t.props('modelValue')).map((t) => t.text())).toEqual(['Muzea'])
 
     toggles[1].vm.$emit('update:model-value', true)
     await flushPromises()
-    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'] }, expect.anything())
+    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'AUDIO', selectedCategories: ['museums', 'monuments'], requireProximity: true }, expect.anything())
   })
 
   it('a changed content mode is PUT; an unchanged one is not', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['museums'] })
+    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: true })
     vi.mocked(putSettings).mockImplementation(async (s) => s)
     setAccessToken('jwt')
     await flushPromises()
@@ -51,17 +51,35 @@ describe('SettingsView', () => {
 
     group.vm.$emit('update:model-value', 'TEXT')
     await flushPromises()
-    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums'] }, expect.anything())
+    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'TEXT', selectedCategories: ['museums'], requireProximity: true }, expect.anything())
+  })
+
+  it('shows requireProximity and writes its change through PUT', async () => {
+    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: false })
+    vi.mocked(putSettings).mockImplementation(async (s) => s)
+    setAccessToken('jwt')
+    await flushPromises()
+    const wrapper = mount(SettingsView)
+    const toggle = wrapper.findAllComponents(QToggle)[0]
+
+    expect(toggle.text()).toBe('Wymagaj zbliżenia do miejsca')
+    expect(toggle.props('modelValue')).toBe(false)
+
+    toggle.vm.$emit('update:model-value', true)
+    await flushPromises()
+
+    expect(putSettings).toHaveBeenCalledWith({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: true }, expect.anything())
+    expect(wrapper.findAllComponents(QToggle)[0].props('modelValue')).toBe(true)
   })
 
   it('renders the revert error as text after a failed save', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['museums'] })
+    vi.mocked(getSettings).mockResolvedValue({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: true })
     vi.mocked(putSettings).mockRejectedValue(new Error('x'))
     setAccessToken('jwt')
     await flushPromises()
     const wrapper = mount(SettingsView)
 
-    wrapper.findAllComponents(QToggle)[1].vm.$emit('update:model-value', true)
+    wrapper.findAllComponents(QToggle)[2].vm.$emit('update:model-value', true)
     await flushPromises()
 
     expect(wrapper.find('[role=alert]').text()).toContain('Nie udało się zapisać')

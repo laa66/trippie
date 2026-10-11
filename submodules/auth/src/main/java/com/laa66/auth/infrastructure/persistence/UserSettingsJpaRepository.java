@@ -11,7 +11,7 @@ interface UserSettingsJpaRepository extends JpaRepository<UserSettings, UUID> {
 
 	@Modifying
 	@Query("update UserSettings s set s.defaultContentMode = :mode, s.selectedCategories = :categories, "
-			+ "s.updatedAt = CURRENT_TIMESTAMP where s.userId = :userId")
+			+ "s.requireProximity = :requireProximity, s.updatedAt = CURRENT_TIMESTAMP where s.userId = :userId")
 	int updateSettings(@Param("userId") UUID userId, @Param("mode") String mode,
-			@Param("categories") String[] categories);
+			@Param("categories") String[] categories, @Param("requireProximity") boolean requireProximity);
 }

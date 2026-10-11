@@ -14,9 +14,10 @@ import jakarta.persistence.Table;
 /**
  * {@code user_settings} JPA entity (1:1 with {@code app_user}, {@code user_id} is both PK and FK).
  * {@code selected_categories} maps the Postgres {@code text[]} column via {@link SqlTypes#ARRAY}.
- * {@code updated_at} is mapped {@code insertable = false} so the DB default fills it on the insert
- * done by {@code create()}; it is only ever written by the JPQL bulk update on
- * {@link UserSettingsJpaRepository}, which needs the attribute to reference {@code s.updatedAt}.
+ * {@code require_proximity} and {@code updated_at} are mapped {@code insertable = false} so the DB default fills them
+ * on the insert done by {@code create()}; they are only ever written by the JPQL bulk update on
+ * {@link UserSettingsJpaRepository}, which needs the attributes to reference {@code s.requireProximity} and
+ * {@code s.updatedAt}.
  */
 @Entity
 @Table(name = "user_settings")
@@ -32,6 +33,9 @@ class UserSettings {
 	@JdbcTypeCode(SqlTypes.ARRAY)
 	@Column(name = "selected_categories")
 	private String[] selectedCategories;
+
+	@Column(name = "require_proximity", insertable = false)
+	private boolean requireProximity = true;
 
 	@Column(name = "updated_at", insertable = false)
 	private Instant updatedAt;
@@ -51,5 +55,9 @@ class UserSettings {
 
 	String[] getSelectedCategories() {
 		return selectedCategories;
+	}
+
+	boolean isRequireProximity() {
+		return requireProximity;
 	}
 }

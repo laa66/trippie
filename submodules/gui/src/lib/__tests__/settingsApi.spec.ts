@@ -15,12 +15,12 @@ describe('settingsApi', () => {
     const store = await import('@/lib/authStore')
     const api = await import('@/lib/settingsApi')
     store.setAccessToken('jwt-s')
-    const fetchMock = vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'] }))
+    const fetchMock = vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true }))
     vi.stubGlobal('fetch', fetchMock)
 
     const settings = await api.getSettings()
 
-    expect(settings).toEqual({ defaultContentMode: 'AUDIO', selectedCategories: ['museums'] })
+    expect(settings).toEqual({ defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/auth/settings')
     expect((init.headers as Headers).get('Authorization')).toBe('Bearer jwt-s')
@@ -31,22 +31,22 @@ describe('settingsApi', () => {
     const store = await import('@/lib/authStore')
     const api = await import('@/lib/settingsApi')
     store.setAccessToken('jwt-s')
-    const fetchMock = vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'TEXT', selectedCategories: [] }))
+    const fetchMock = vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'TEXT', selectedCategories: [], requireProximity: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const out = await api.putSettings({ defaultContentMode: 'BOTH', selectedCategories: ['museums'] })
+    const out = await api.putSettings({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: true })
 
-    expect(out).toEqual({ defaultContentMode: 'TEXT', selectedCategories: [] })
+    expect(out).toEqual({ defaultContentMode: 'TEXT', selectedCategories: [], requireProximity: true })
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.method).toBe('PUT')
-    expect(JSON.parse(init.body as string)).toEqual({ defaultContentMode: 'BOTH', selectedCategories: ['museums'] })
+    expect(JSON.parse(init.body as string)).toEqual({ defaultContentMode: 'BOTH', selectedCategories: ['museums'], requireProximity: true })
     expect((init.headers as Headers).get('Authorization')).toBe('Bearer jwt-s')
   })
 
   it('PUT 400 (unknown slug / enum) throws AuthApiError with status and detail', async () => {
     const api = await import('@/lib/settingsApi')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res(400, { detail: 'unknown category' })))
-    await expect(api.putSettings({ defaultContentMode: 'BOTH', selectedCategories: ['nope'] })).rejects.toMatchObject({
+    await expect(api.putSettings({ defaultContentMode: 'BOTH', selectedCategories: ['nope'], requireProximity: true })).rejects.toMatchObject({
       status: 400,
       detail: 'unknown category',
     })
@@ -54,8 +54,18 @@ describe('settingsApi', () => {
 
   it('rejects a malformed 200 body (unknown mode)', async () => {
     const api = await import('@/lib/settingsApi')
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'LOUD', selectedCategories: [] })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res(200, { defaultContentMode: 'LOUD', selectedCategories: [], requireProximity: true })))
     await expect(api.getSettings()).rejects.toThrow(/Malformed/)
+  })
+
+  it.each([
+    ['a non-boolean requireProximity', { defaultContentMode: 'BOTH', selectedCategories: [], requireProximity: 'tak' }],
+    ['a missing requireProximity', { defaultContentMode: 'BOTH', selectedCategories: [] }],
+  ])('rejects a 200 body with %s', async (_name, body) => {
+    const api = await import('@/lib/settingsApi')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res(200, body)))
+    await expect(api.getSettings()).rejects.toThrow(/Malformed/)
+    await expect(api.putSettings({ defaultContentMode: 'BOTH', selectedCategories: [], requireProximity: true })).rejects.toThrow(/Malformed/)
   })
 
   // The session controller in useCategorySelection: a logout must cancel whatever it started. The
@@ -75,7 +85,7 @@ describe('settingsApi', () => {
     const caller = new AbortController()
 
     const get = api.getSettings(caller.signal).catch((e: unknown) => e)
-    const put = api.putSettings({ defaultContentMode: 'TEXT', selectedCategories: [] }, caller.signal).catch((e: unknown) => e)
+    const put = api.putSettings({ defaultContentMode: 'TEXT', selectedCategories: [], requireProximity: true }, caller.signal).catch((e: unknown) => e)
     await Promise.resolve()
     expect(signals).toHaveLength(2)
     expect(signals.every((s) => !s.aborted)).toBe(true)
@@ -99,7 +109,7 @@ describe('settingsApi', () => {
       vi.stubGlobal('fetch', fetchMock)
 
       const get = api.getSettings().catch((e: unknown) => e)
-      const put = api.putSettings({ defaultContentMode: 'TEXT', selectedCategories: [] }, new AbortController().signal).catch((e: unknown) => e)
+      const put = api.putSettings({ defaultContentMode: 'TEXT', selectedCategories: [], requireProximity: true }, new AbortController().signal).catch((e: unknown) => e)
       await vi.advanceTimersByTimeAsync(9_999)
       expect(fetchMock.mock.calls.every((c) => !(c[1] as RequestInit).signal!.aborted)).toBe(true)
       await vi.advanceTimersByTimeAsync(1)

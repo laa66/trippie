@@ -32,7 +32,7 @@ describe('useCategorySelection with the real settingsApi + apiFetch', () => {
       settingsCalls++
       return settingsCalls === 1
         ? res(401, {})
-        : res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'] })
+        : res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true })
     })
 
     const { sel, authStore } = await boot(fetchMock)
@@ -50,7 +50,7 @@ describe('useCategorySelection with the real settingsApi + apiFetch', () => {
         refreshDead = true
         return res(401, {})
       }
-      return res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'] })
+      return res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true })
     })
 
     const { sel, authStore } = await boot(fetchMock)
@@ -131,7 +131,7 @@ describe('useCategorySelection with the real settingsApi + apiFetch', () => {
           })
         }
         if (init?.method === 'PUT') return Promise.resolve(res(401, {}))
-        return Promise.resolve(res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'] }))
+        return Promise.resolve(res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true }))
       })
       const { sel, authStore } = await boot(fetchMock)
       expect(sel.selected.value).toEqual(['museums'])
@@ -173,7 +173,7 @@ describe('useCategorySelection with the real settingsApi + apiFetch', () => {
     const putSignals: AbortSignal[] = []
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
       if (init?.method !== 'PUT') {
-        return Promise.resolve(res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'] }))
+        return Promise.resolve(res(200, { defaultContentMode: 'AUDIO', selectedCategories: ['museums'], requireProximity: true }))
       }
       putSignals.push(init.signal!)
       return new Promise<Response>(() => {})

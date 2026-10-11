@@ -6,6 +6,7 @@ export type ContentMode = (typeof CONTENT_MODES)[number]
 export interface UserSettings {
   defaultContentMode: ContentMode
   selectedCategories: string[]
+  requireProximity: boolean
 }
 
 const SETTINGS_URL = '/api/auth/settings'
@@ -18,7 +19,8 @@ function asSettings(body: unknown): UserSettings {
     typeof b !== 'object' ||
     !(CONTENT_MODES as readonly unknown[]).includes(b.defaultContentMode) ||
     !Array.isArray(b.selectedCategories) ||
-    !b.selectedCategories.every((c) => typeof c === 'string')
+    !b.selectedCategories.every((c) => typeof c === 'string') ||
+    typeof b.requireProximity !== 'boolean'
   ) {
     throw new Error('Malformed settings response')
   }

@@ -29,8 +29,8 @@ public class UserSettingsService implements GetUserSettings, UpdateUserSettings 
 	}
 
 	@Override
-	public UserSettingsData update(UUID userId, ContentMode mode, List<String> categories) {
-		userRepository.updateSettings(userId, mode, categories);
-		return new UserSettingsData(mode, categories);
+	public UserSettingsData update(UUID userId, ContentMode mode, List<String> categories, boolean requireProximity) {
+		userRepository.updateSettings(userId, mode, categories, requireProximity);
+		return new UserSettingsData(mode, categories, requireProximity);
 	}
 }

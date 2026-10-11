@@ -82,13 +82,16 @@ class JpaUserRepository implements UserRepository {
 	public Optional<UserSettingsData> findSettings(UUID userId) {
 		return userSettings.findById(userId)
 				.map(s -> new UserSettingsData(
-						ContentMode.valueOf(s.getDefaultContentMode()), List.of(s.getSelectedCategories())));
+						ContentMode.valueOf(s.getDefaultContentMode()), List.of(s.getSelectedCategories()),
+						s.isRequireProximity()));
 	}
 
 	@Override
 	@Transactional
-	public void updateSettings(UUID userId, ContentMode mode, List<String> selectedCategories) {
-		int rows = userSettings.updateSettings(userId, mode.name(), selectedCategories.toArray(String[]::new));
+	public void updateSettings(UUID userId, ContentMode mode, List<String> selectedCategories,
+			boolean requireProximity) {
+		int rows = userSettings.updateSettings(userId, mode.name(), selectedCategories.toArray(String[]::new),
+				requireProximity);
 		if (rows == 0) {
 			throw new UserSettingsNotFoundException();
 		}

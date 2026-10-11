@@ -70,11 +70,34 @@ class SettingsIntegrationTest extends AbstractPostgresIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(result -> {
 					String body = result.getResponse().getContentAsString();
-					assertThat(body).contains("\"defaultContentMode\":\"BOTH\"");
+					assertThat(body).contains("\"defaultContentMode\":\"BOTH\"")
+							.contains("\"requireProximity\":true");
 					for (String slug : CategorySlugs.ALL) {
 						assertThat(body).contains(slug);
 					}
 				});
+	}
+
+	@Test
+	void put_requireProximityFalse_roundTripsOnGet_andPersists() throws Exception {
+		UUID userId = seedUser();
+
+		mvc.perform(putSettings(userId, "BOTH", "[\"museums\"]", false))
+				.andExpect(status().isOk())
+				.andExpect(result -> assertThat(result.getResponse().getContentAsString())
+						.contains("\"requireProximity\":false"));
+
+		mvc.perform(get("/settings").header("X-User-Id", userId.toString()))
+				.andExpect(status().isOk())
+				.andExpect(result -> assertThat(result.getResponse().getContentAsString())
+						.contains("\"requireProximity\":false"));
+
+		Boolean stored = jdbc()
+				.sql("SELECT require_proximity FROM user_settings WHERE user_id = ?")
+				.param(userId)
+				.query(Boolean.class)
+				.single();
+		assertThat(stored).isFalse();
 	}
 
 	@Test
@@ -193,10 +216,16 @@ class SettingsIntegrationTest extends AbstractPostgresIntegrationTest {
 	}
 
 	private static MockHttpServletRequestBuilder putSettings(UUID userId, String mode, String categoriesJson) {
+		return putSettings(userId, mode, categoriesJson, true);
+	}
+
+	private static MockHttpServletRequestBuilder putSettings(UUID userId, String mode, String categoriesJson,
+			boolean requireProximity) {
 		return put("/settings")
 				.header("X-User-Id", userId.toString())
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"defaultContentMode\":\"" + mode + "\",\"selectedCategories\":" + categoriesJson + "}");
+				.content("{\"defaultContentMode\":\"" + mode + "\",\"selectedCategories\":" + categoriesJson
+						+ ",\"requireProximity\":" + requireProximity + "}");
 	}
 
 	private static String unique() {

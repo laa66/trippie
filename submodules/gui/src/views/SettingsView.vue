@@ -23,6 +23,24 @@
           />
         </q-list>
         <q-list class="rounded-card bg-surface pb-2 shadow-card">
+          <q-item-label header class="text-ink-muted">Odblokowywanie miejsc</q-item-label>
+          <q-item>
+            <q-item-section>
+              <q-toggle
+                class="w-full flex-nowrap justify-between"
+                left-label
+                color="primary"
+                :model-value="requireProximity"
+                label="Wymagaj zbliżenia do miejsca"
+                @update:model-value="setRequireProximity"
+              />
+              <q-item-label caption class="text-ink-muted">
+                Miejsca już odblokowane zostają odblokowane na stałe, także po ponownym włączeniu wymogu.
+              </q-item-label>
+            </q-item-section>
+          </q-item>
+        </q-list>
+        <q-list class="rounded-card bg-surface pb-2 shadow-card">
           <q-item-label header class="text-ink-muted">Kategorie</q-item-label>
           <q-item v-for="slug in CATEGORY_SLUGS" :key="slug">
             <q-item-section>
@@ -71,7 +89,8 @@ const MODE_LABELS: Record<ContentMode, string> = {
 
 const modeOptions = CONTENT_MODES.map((mode) => ({ value: mode, label: MODE_LABELS[mode] }))
 
-const { defaultContentMode, error, isSelected, toggle, setContentMode } = useCategorySelection()
+const { defaultContentMode, requireProximity, error, isSelected, toggle, setContentMode, setRequireProximity } =
+  useCategorySelection()
 
 function onModeChange(mode: ContentMode) {
   if (mode !== defaultContentMode.value) {

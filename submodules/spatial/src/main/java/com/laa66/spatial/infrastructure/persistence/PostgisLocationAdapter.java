@@ -1,7 +1,5 @@
 package com.laa66.spatial.infrastructure.persistence;
 
-import java.sql.Array;
-import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -9,7 +7,6 @@ import java.util.Set;
 
 import javax.sql.DataSource;
 
-import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -27,8 +24,15 @@ import com.laa66.spatial.domain.port.out.LocationRepository;
  * <p>{@code geom} is {@code geography(Point,4326)}, so {@code ST_DWithin} uses the plain GiST
  * index directly. {@code ST_Distance} on the same spheroid is both the sort key and the
  * projected {@code distanceMeters}, so the DB order can never desync from the reported number.
- * The category filter is a single {@code = ANY(?)} over a {@code java.sql.Array}: one plan, one
+ * The category filter is a single {@code = ANY(?)} over a bound {@code text[]}: one plan, one
  * prepared statement, no {@code IN (...)} placeholder expansion.
+ *
+ * <p>The array is bound as a plain {@code String[]}, which pgjdbc infers as {@code text[]}.
+ * Deliberately not a {@code java.sql.Array}: building one needs a {@link java.sql.Connection}, and
+ * a {@code PgArray} keeps a reference to the physical connection it was created on, so returning
+ * that connection to the pool and binding the array on a second checkout is a use-after-release
+ * that only fails once the first connection is evicted. Deliberately not a {@code List} either —
+ * {@code JdbcClient} expands that into placeholders and the {@code text[]} cast stops parsing.
  */
 @Repository
 public class PostgisLocationAdapter implements LocationRepository {
@@ -47,11 +51,9 @@ public class PostgisLocationAdapter implements LocationRepository {
 			LIMIT :limit
 			""";
 
-	private final DataSource dataSource;
 	private final JdbcClient jdbcClient;
 
 	public PostgisLocationAdapter(DataSource dataSource) {
-		this.dataSource = dataSource;
 		this.jdbcClient = JdbcClient.create(dataSource);
 	}
 
@@ -84,13 +86,7 @@ public class PostgisLocationAdapter implements LocationRepository {
 				rs.getDouble("distance_m"));
 	}
 
-	private Array categorySlugArray(Set<Category> categories) {
-		String[] slugs = categories.stream().map(Category::slug).toArray(String[]::new);
-		try (Connection connection = dataSource.getConnection()) {
-			return connection.createArrayOf("text", slugs);
-		}
-		catch (SQLException ex) {
-			throw new DataAccessResourceFailureException("Failed to build category array", ex);
-		}
+	private String[] categorySlugArray(Set<Category> categories) {
+		return categories.stream().map(Category::slug).toArray(String[]::new);
 	}
 }
