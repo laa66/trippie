@@ -9,6 +9,32 @@ export const MAX_RADIUS_METERS = 5000
  */
 export const MIN_QUERY_ZOOM = 12
 
+/**
+ * Proximity radius for unlocking a POI. Same convention as the category contract: the SERVER
+ * enforces it (one `ST_DWithin(..., 50)` inside the insert) and the client keeps a copy only to
+ * skip a round-trip that is certain to be refused.
+ *
+ * The edge is EXCLUSIVE — `< 50`, never `<= 50`. Measured in M3-04: `ST_DWithin(..., 50)` is
+ * false at exactly 50.0 m and the threshold bites at 49.9999.
+ *
+ * Accepted outright, not worked around: the client measures with {@link haversineMeters} on a
+ * sphere while the server measures with `ST_Distance` on the WGS84 spheroid, a ~15 cm disagreement
+ * at this radius. So the two WILL disagree exactly at the edge, and a POI the client offered being
+ * `refused` is a NORMAL outcome there, not a failure — callers must neither surface it as an error
+ * nor retry it in place.
+ */
+export const UNLOCK_RADIUS_METERS = 50
+
+/**
+ * Worst fix accuracy a proximity unlock may be granted at. Two gates on purpose: this one saves a
+ * pointless round-trip, while the server stays the point of enforcement (`422` for the whole
+ * request) and survives any client regression.
+ *
+ * Inclusive — `<= 100` passes, so 100 is still a candidate and 101 is not, matching the server's
+ * `accuracy > 100` rejection.
+ */
+export const MAX_ACCURACY_METERS = 100
+
 const EARTH_RADIUS_METERS = 6_371_000
 
 interface LatLon {
