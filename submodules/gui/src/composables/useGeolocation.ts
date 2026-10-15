@@ -8,6 +8,13 @@ export interface GeoPosition {
 /** Map center used before (or instead of) a real fix: Wrocław old town. */
 export const WROCLAW_FALLBACK: GeoPosition = { latitude: 51.1079, longitude: 17.0385 }
 
+export interface GeoFix {
+  latitude: number
+  longitude: number
+  accuracyMeters: number
+  timestamp: number
+}
+
 export interface UseGeolocation {
   /** Current best-known position. Starts at (and falls back to) WROCLAW_FALLBACK. */
   position: Ref<GeoPosition>
@@ -15,6 +22,12 @@ export interface UseGeolocation {
   isFallback: Ref<boolean>
   /** Human-readable reason geolocation is unavailable / denied, else null. */
   error: Ref<string | null>
+  /**
+   * Last real fix with a measured accuracy, else null. Never set from the fallback
+   * and kept across later errors, so proximity logic must read this, not `position`:
+   * the fallback sits inside the POI cluster and would unlock them.
+   */
+  fix: Ref<GeoFix | null>
   start: () => void
   stop: () => void
 }
@@ -28,6 +41,7 @@ export function useGeolocation(): UseGeolocation {
   const position = ref<GeoPosition>({ ...WROCLAW_FALLBACK })
   const isFallback = ref(true)
   const error = ref<string | null>(null)
+  const fix = ref<GeoFix | null>(null)
   let watchId: number | null = null
 
   const start = (): void => {
@@ -43,6 +57,14 @@ export function useGeolocation(): UseGeolocation {
         position.value = { latitude: pos.coords.latitude, longitude: pos.coords.longitude }
         isFallback.value = false
         error.value = null
+        if (Number.isFinite(pos.coords.accuracy)) {
+          fix.value = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracyMeters: pos.coords.accuracy,
+            timestamp: pos.timestamp,
+          }
+        }
       },
       (err) => {
         if (!isFallback.value) {
@@ -64,5 +86,5 @@ export function useGeolocation(): UseGeolocation {
     watchId = null
   }
 
-  return { position, isFallback, error, start, stop }
+  return { position, isFallback, error, fix, start, stop }
 }
