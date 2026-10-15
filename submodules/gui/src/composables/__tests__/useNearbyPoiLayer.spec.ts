@@ -7,7 +7,7 @@ import { POI_LAYER_ID, POI_SOURCE_ID } from '@/lib/poiLayer'
 import type { NearbyItem } from '@/lib/nearbyApi'
 
 function poi(id: string, category = 'museums'): NearbyItem {
-  return { id, name: id, category, lat: 51, lon: 17, distanceMeters: 1 }
+  return { id, name: id, category, lat: 51, lon: 17, distanceMeters: 1, unlocked: false }
 }
 
 /** Fake MapLibre map exposing only the layer-management surface the composable touches. */

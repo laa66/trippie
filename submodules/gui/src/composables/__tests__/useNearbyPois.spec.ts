@@ -8,7 +8,7 @@ vi.mock('@/lib/nearbyApi', () => ({ fetchNearby: vi.fn() }))
 
 const STORAGE_KEY = 'trippie.selectedCategories'
 const RESPONSE: NearbyResponse = {
-  items: [{ id: 'x', name: 'POI', category: 'museums', lat: 51, lon: 17, distanceMeters: 10 }],
+  items: [{ id: 'x', name: 'POI', category: 'museums', lat: 51, lon: 17, distanceMeters: 10, unlocked: false }],
   truncated: false,
 }
 
@@ -205,11 +205,11 @@ describe('useNearbyPois', () => {
     const { api, mockFetch } = await bootstrap({ zoom: 14 })
 
     const oldResponse: NearbyResponse = {
-      items: [{ id: 'old', name: null, category: 'museums', lat: 51, lon: 17, distanceMeters: 5 }],
+      items: [{ id: 'old', name: null, category: 'museums', lat: 51, lon: 17, distanceMeters: 5, unlocked: false }],
       truncated: false,
     }
     const newResponse: NearbyResponse = {
-      items: [{ id: 'new', name: null, category: 'museums', lat: 51, lon: 17, distanceMeters: 9 }],
+      items: [{ id: 'new', name: null, category: 'museums', lat: 51, lon: 17, distanceMeters: 9, unlocked: false }],
       truncated: true,
     }
 

@@ -3,8 +3,8 @@ import { fetchNearby, type NearbyResponse } from '@/lib/nearbyApi'
 
 const BODY: NearbyResponse = {
   items: [
-    { id: 'a1', name: 'Rynek', category: 'attractions', lat: 51.11, lon: 17.03, distanceMeters: 42 },
-    { id: 'a2', name: null, category: 'monuments', lat: 51.12, lon: 17.04, distanceMeters: 130 },
+    { id: 'a1', name: 'Rynek', category: 'attractions', lat: 51.11, lon: 17.03, distanceMeters: 42, unlocked: false },
+    { id: 'a2', name: null, category: 'monuments', lat: 51.12, lon: 17.04, distanceMeters: 130, unlocked: true },
   ],
   truncated: false,
 }
@@ -126,13 +126,30 @@ describe('fetchNearby', () => {
   // The boundary check useNearbyPois depends on: it assigns res.items/res.truncated straight into
   // refs, so `{}` would land `undefined` in them and `null` would throw a TypeError into its catch.
   it('rejects a malformed 200 body before it reaches the composables', async () => {
+    const item = { id: 'a', category: 'museums', name: null, lat: 51, lon: 17, distanceMeters: 4, unlocked: false }
     const malformed: unknown[] = [
       null,
       {},
       { items: [], truncated: 'no' },
       { items: 'nope', truncated: false },
-      { items: [{ id: 1, category: 'museums', name: null, lat: 51, lon: 17, distanceMeters: 4 }], truncated: false },
-      { items: [{ id: 'a', category: 'museums', name: null, lat: '51', lon: 17, distanceMeters: 4 }], truncated: false },
+      { items: [{ ...item, id: 1 }], truncated: false },
+      { items: [{ ...item, lat: '51' }], truncated: false },
+      // `lon` was the FOURTH unpinned check, not in LOW-7's list of three: the M2-18 finding said
+      // "three of six" and there were four, so mutating only what the finding named would have
+      // missed this one (Light, review M3-05).
+      { items: [{ ...item, lon: '17' }], truncated: false },
+      // `unlocked` pinned both ways: a wrong type AND an absent field. M3-08 keys the POI layer's
+      // locked/unlocked paint on it, so a non-boolean would render every POI in one state and an
+      // absent one would render them all locked -- silent, and indistinguishable from "walked
+      // nowhere". Removing the `unlocked` check in asNearby must redden both of these rows.
+      { items: [{ ...item, unlocked: 'yes' }], truncated: false },
+      { items: [{ id: 'a', category: 'museums', name: null, lat: 51, lon: 17, distanceMeters: 4 }], truncated: false },
+      // LOW-7 (M6 item, closed here because it is three rows in this table): `category`, `name` and
+      // `distanceMeters` were pinned by nothing. `category` is the one that bites -- poiLayer keys
+      // its paint expression on it, so a non-string yields unstyled or invisible POIs.
+      { items: [{ ...item, category: 7 }], truncated: false },
+      { items: [{ ...item, name: 42 }], truncated: false },
+      { items: [{ ...item, distanceMeters: '4' }], truncated: false },
     ]
     for (const body of malformed) {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body }))

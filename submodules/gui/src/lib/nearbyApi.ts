@@ -7,6 +7,8 @@ export interface NearbyItem {
   lat: number
   lon: number
   distanceMeters: number
+  /** This user's unlock state, as the server knows it. Server truth, never a local guess. */
+  unlocked: boolean
 }
 
 export interface NearbyResponse {
@@ -44,7 +46,8 @@ function isNearbyItem(item: unknown): boolean {
     (i.name === null || typeof i.name === 'string') &&
     typeof i.lat === 'number' &&
     typeof i.lon === 'number' &&
-    typeof i.distanceMeters === 'number'
+    typeof i.distanceMeters === 'number' &&
+    typeof i.unlocked === 'boolean'
   )
 }
 

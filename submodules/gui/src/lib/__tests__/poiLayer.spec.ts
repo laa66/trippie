@@ -277,8 +277,8 @@ describe('nearbyPoiLayer', () => {
 
 describe('itemsToFeatureCollection', () => {
   const items: NearbyItem[] = [
-    { id: 'a', name: 'Rynek', category: 'attractions', lat: 51.11, lon: 17.03, distanceMeters: 5 },
-    { id: 'b', name: null, category: 'museums', lat: 51.12, lon: 17.04, distanceMeters: 9 },
+    { id: 'a', name: 'Rynek', category: 'attractions', lat: 51.11, lon: 17.03, distanceMeters: 5, unlocked: false },
+    { id: 'b', name: null, category: 'museums', lat: 51.12, lon: 17.04, distanceMeters: 9, unlocked: true },
   ]
 
   it('emits GeoJSON points with [lon, lat] order and the category property', () => {

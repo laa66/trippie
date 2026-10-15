@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -33,6 +34,8 @@ import com.laa66.spatial.domain.port.in.FindNearbyLocationsForUser;
 @WebMvcTest(NearbyLocationsController.class)
 class NearbyLocationsControllerTest {
 
+	private static final UUID USER = UUID.fromString("77777777-7777-4777-8777-777777777777");
+
 	@Autowired
 	private MockMvc mvc;
 
@@ -42,7 +45,8 @@ class NearbyLocationsControllerTest {
 	@Test
 	void okResponse_hasFrozenItemShape() throws Exception {
 		LocationPoint point = new LocationPoint("node/123", "Some POI", Category.SACRED, 51.1, 17.0, 42.5);
-		when(findNearbyLocations.find(any(), any())).thenReturn(new NearbyResultForUser(List.of(new NearbyPointForUser(point, true)), false));
+		when(findNearbyLocations.find(any(), any()))
+				.thenReturn(new NearbyResultForUser(List.of(new NearbyPointForUser(point, true)), false));
 
 		mvc.perform(nearby("?lat=51.1&lon=17.0"))
 				.andExpect(status().isOk())
@@ -53,6 +57,7 @@ class NearbyLocationsControllerTest {
 				.andExpect(jsonPath("$.items[0].lat").value(51.1))
 				.andExpect(jsonPath("$.items[0].lon").value(17.0))
 				.andExpect(jsonPath("$.items[0].distanceMeters").value(42.5))
+				.andExpect(jsonPath("$.items[0].unlocked").value(true))
 				.andExpect(jsonPath("$.items[0].description").doesNotExist())
 				.andExpect(jsonPath("$.items[0].tags").doesNotExist());
 	}
@@ -274,5 +279,67 @@ class NearbyLocationsControllerTest {
 	void categoriesCsv_withNonBlankUnknownSlug_is400() throws Exception {
 		mvc.perform(nearby("?lat=51.1&lon=17.0&categories=sacred,bogus"))
 				.andExpect(status().isBadRequest());
+	}
+
+	// --- X-User-Id: the identity the unlocked flag is about ------------------------------
+
+	/**
+	 * The header the gateway sets, carried to the port beside the query and never inside it. Pinned
+	 * with an explicit {@code eq(USER)} everywhere a query is captured in this class, so a port call
+	 * made with some other subject — or with a hard-coded one — cannot pass.
+	 */
+	@Test
+	void theTrustedHeaderIsPassedToThePortAsTheSubject() throws Exception {
+		when(findNearbyLocations.find(any(), any())).thenReturn(new NearbyResultForUser(List.of(), false));
+
+		mvc.perform(nearby("?lat=51.1&lon=17.0")).andExpect(status().isOk());
+
+		verify(findNearbyLocations).find(eq(USER), any());
+	}
+
+	/**
+	 * <strong>Rejection, not {@code unlocked: false}.</strong> If the gateway ever stopped setting
+	 * the header, answering 200 with everything locked would look exactly like a user who has walked
+	 * nowhere — a product bug, debugged as one — while 400 names the actual fault. The port must not
+	 * be called at all: there is no subject to ask about.
+	 */
+	@Test
+	void aMissingUserHeaderIs400AndNeverReachesThePort() throws Exception {
+		mvc.perform(get("/locations/nearby?lat=51.1&lon=17.0"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.valueOf("application/problem+json")))
+				.andExpect(jsonPath("$.status").value(400));
+
+		verifyNoInteractions(findNearbyLocations);
+	}
+
+	/** The UUID bind, same reason as on {@code /locations/unlock}: a crafted value cannot get past it. */
+	@Test
+	void aMalformedUserHeaderIs400AndNeverReachesThePort() throws Exception {
+		mvc.perform(get("/locations/nearby?lat=51.1&lon=17.0").header("X-User-Id", "not-a-uuid\r\nX-Injected: 1"))
+				.andExpect(status().isBadRequest());
+
+		verifyNoInteractions(findNearbyLocations);
+	}
+
+	/** The flag is per item, so a mixed page has to come back mixed, not uniformly true or false. */
+	@Test
+	void unlockedIsCarriedPerItem() throws Exception {
+		LocationPoint locked = new LocationPoint("node/locked", "A", Category.SACRED, 51.1, 17.0, 10);
+		LocationPoint unlocked = new LocationPoint("node/unlocked", "B", Category.MUSEUMS, 51.2, 17.1, 20);
+		when(findNearbyLocations.find(any(), any())).thenReturn(new NearbyResultForUser(
+				List.of(new NearbyPointForUser(locked, false), new NearbyPointForUser(unlocked, true)), false));
+
+		mvc.perform(nearby("?lat=51.1&lon=17.0"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.items[0].id").value("node/locked"))
+				.andExpect(jsonPath("$.items[0].unlocked").value(false))
+				.andExpect(jsonPath("$.items[1].id").value("node/unlocked"))
+				.andExpect(jsonPath("$.items[1].unlocked").value(true));
+	}
+
+	/** Every request in this class carries the trusted header; the cases about its absence build their own. */
+	private MockHttpServletRequestBuilder nearby(String query) {
+		return get("/locations/nearby" + query).header("X-User-Id", USER.toString());
 	}
 }
