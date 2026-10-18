@@ -1,15 +1,26 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { CATEGORY_SLUGS } from '@/composables/useCategorySelection'
+import {
+  Color,
+  createPropertyExpression,
+  v8,
+  type StylePropertySpecification,
+} from '@maplibre/maplibre-gl-style-spec'
+import { CATEGORY_SLUGS, type CategorySlug } from '@/composables/useCategorySelection'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import {
+  HIT_TEST_PADDING_PX,
   POI_COLOR_PROPERTIES,
   STROKE_COLOR_PROPERTY,
   UNKNOWN_CATEGORY_PROPERTY,
   buildCategoryColorExpression,
   categoryColorExpression,
+  hitTestBox,
   itemsToFeatureCollection,
+  lockStateExpression,
   nearbyPoiLayer,
+  pickPoiHit,
   readPoiPalette,
   POI_LAYER_ID,
   POI_SOURCE_ID,
@@ -103,6 +114,102 @@ function deltaE2000(hexA: string, hexB: string): number {
     Math.sin(60 * Math.exp(-(((hBar - 275) / 25) ** 2)) * rad)
 
   return Math.sqrt((dL / sL) ** 2 + (dC / sC) ** 2 + (dH / sH) ** 2 + rT * (dC / sC) * (dH / sH))
+}
+
+/** A feature as far as the paint is concerned. */
+interface PaintedDot {
+  category: string
+  unlocked: boolean
+}
+
+/**
+ * Evaluates the two expression forms this layer's paint is made of, so the colours asserted below
+ * are the ones MapLibre would resolve for a given feature — not a re-derivation of what the paint
+ * is assumed to say. Without this, "the inversion is measured" would really mean "the inversion is
+ * measured somewhere else, and this test agrees with that copy".
+ */
+function resolvePaint(value: unknown, dot: PaintedDot): string {
+  if (typeof value === 'string') return value
+
+  const expr = value as unknown[]
+  if (expr[0] === 'case') {
+    expect(expr).toHaveLength(4)
+    expect(expr[1]).toEqual(['==', ['get', 'unlocked'], true])
+    return resolvePaint(dot.unlocked ? expr[2] : expr[3], dot)
+  }
+  if (expr[0] === 'match') {
+    expect(expr[1]).toEqual(['get', 'category'])
+    const pairs = expr.slice(2, expr.length - 1)
+    for (let i = 0; i < pairs.length; i += 2) {
+      if (pairs[i] === dot.category) return resolvePaint(pairs[i + 1], dot)
+    }
+    return resolvePaint(expr[expr.length - 1], dot)
+  }
+  throw new Error(`resolvePaint: unsupported expression ${JSON.stringify(expr[0])}`)
+}
+
+/**
+ * Compiles one paint value with MapLibre's OWN expression compiler and hands back an evaluator for
+ * it. Where `resolvePaint` walks the expression we wrote, this runs the expression the renderer
+ * would run — so it also fails when the compiler REJECTS the paint, which no assertion about the
+ * expression's shape can see.
+ */
+function paintEvaluator(
+  layer: ReturnType<typeof nearbyPoiLayer>,
+  key: 'circle-color' | 'circle-stroke-color',
+): (properties: Record<string, unknown>) => Color {
+  const compiled = createPropertyExpression(
+    layer.paint?.[key],
+    v8.paint_circle[key] as StylePropertySpecification,
+  )
+  if (compiled.result !== 'success') {
+    throw new Error(`paintEvaluator: ${key} did not compile: ${JSON.stringify(compiled.value)}`)
+  }
+  return (properties) => compiled.value.evaluate({ zoom: 15 }, { type: 'Point', properties }) as Color
+}
+
+/**
+ * The paint above is compiled by the style-spec package, and the value of that measurement is that
+ * it is the SAME compiler maplibre-gl bundles at runtime. We now declare that package ourselves
+ * (pinned, because a caret here could drift away from maplibre-gl's own range), so this guard is
+ * what makes the drift loud: if a future maplibre-gl ever wants a range this pinned copy does not
+ * satisfy, npm resolves a second, nested copy for it, this spec keeps compiling with the top-level
+ * one, and every assertion here would quietly stop describing what ships. A version check cannot
+ * be forgotten the way a comment can.
+ */
+describe('the style-spec these measurements compile with', () => {
+  const require_ = createRequire(import.meta.url)
+  const versionOf = (name: string): string =>
+    (JSON.parse(readFileSync(require_.resolve(`${name}/package.json`), 'utf8')) as { version: string }).version
+
+  it('is the one maplibre-gl itself asks for', () => {
+    const required = (
+      JSON.parse(readFileSync(require_.resolve('maplibre-gl/package.json'), 'utf8')) as {
+        dependencies: Record<string, string>
+      }
+    ).dependencies['@maplibre/maplibre-gl-style-spec']
+    const caret = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(required)
+    expect(caret, `unhandled range shape: ${required}`).not.toBeNull()
+
+    const [major, minor, patch] = versionOf('@maplibre/maplibre-gl-style-spec').split('.').map(Number)
+    const [reqMajor, reqMinor, reqPatch] = caret!.slice(1).map(Number)
+
+    // Caret semantics, spelled out: same major, and at least the required minor.patch.
+    expect(major).toBe(reqMajor)
+    const atLeastRequired = minor > reqMinor || (minor === reqMinor && patch >= reqPatch)
+    expect(atLeastRequired, `installed ${major}.${minor}.${patch} does not satisfy ${required}`).toBe(true)
+  })
+})
+
+/** What a dot in the given state is actually painted with: its fill and its ring. */
+function dotColors(
+  layer: ReturnType<typeof nearbyPoiLayer>,
+  dot: PaintedDot,
+): { fill: string; ring: string } {
+  return {
+    fill: resolvePaint(layer.paint?.['circle-color'], dot),
+    ring: resolvePaint(layer.paint?.['circle-stroke-color'], dot),
+  }
 }
 
 const fakePalette: PoiPalette = {
@@ -205,11 +312,33 @@ describe('the frozen POI palette', () => {
 
   // The ring is the only thing between a dot and the basemap, so a dot that does not contrast with
   // its own ring reads as a white blob. 3:1 is the WCAG floor for a graphical object.
-  it('clears 3:1 against its own ring, every category', () => {
-    for (const slug of CATEGORY_SLUGS) {
-      expect(contrastRatio(palette.categories[slug], palette.stroke)).toBeGreaterThanOrEqual(3)
+  //
+  // Measured in BOTH lock states, and read back out of the real paint: `viewpoints` clears the
+  // floor by 0.09 (3.09:1 against white), so an inversion that quietly introduced a THIRD colour
+  // would have nothing to spare. The result is not a coincidence and the test says why: the
+  // inversion swaps the same two colours, the measured pair is the same unordered pair, and
+  // contrastRatio is symmetric — so one measurement covers both states, which is asserted here
+  // rather than assumed.
+  it('clears 3:1 against its own ring, every category, unlocked AND locked', () => {
+    const layer = nearbyPoiLayer(palette)
+
+    for (const slug of [...CATEGORY_SLUGS, 'not-a-slug']) {
+      const expectedCategoryColor =
+        slug === 'not-a-slug' ? palette.unknown : palette.categories[slug as CategorySlug]
+
+      const unlocked = dotColors(layer, { category: slug, unlocked: true })
+      const locked = dotColors(layer, { category: slug, unlocked: false })
+
+      // Same pair, inverted: fill and ring trade places and nothing else enters.
+      expect(unlocked).toEqual({ fill: expectedCategoryColor, ring: palette.stroke })
+      expect(locked).toEqual({ fill: palette.stroke, ring: expectedCategoryColor })
+
+      const unlockedRatio = contrastRatio(unlocked.fill, unlocked.ring)
+      const lockedRatio = contrastRatio(locked.fill, locked.ring)
+      expect(unlockedRatio).toBeGreaterThanOrEqual(3)
+      expect(lockedRatio).toBeGreaterThanOrEqual(3)
+      expect(lockedRatio).toBe(unlockedRatio)
     }
-    expect(contrastRatio(palette.unknown, palette.stroke)).toBeGreaterThanOrEqual(3)
   })
 })
 
@@ -259,8 +388,67 @@ describe('nearbyPoiLayer', () => {
     expect(layer.id).toBe(POI_LAYER_ID)
     expect(layer.type).toBe('circle')
     expect(layer.source).toBe(POI_SOURCE_ID)
-    expect(layer.paint?.['circle-color']).toEqual(categoryColorExpression(fakePalette))
-    expect(layer.paint?.['circle-stroke-color']).toBe(fakePalette.stroke)
+    expect(layer.paint?.['circle-color']).toEqual(
+      lockStateExpression(categoryColorExpression(fakePalette), fakePalette.stroke),
+    )
+    expect(layer.paint?.['circle-stroke-color']).toEqual(
+      lockStateExpression(fakePalette.stroke, categoryColorExpression(fakePalette)),
+    )
+  })
+
+  // The lock state is carried by the fill inversion ALONE. Shape, radius and icon are reserved for
+  // the category (M6 picks one of them to solve colour-blind distinguishability), so a radius that
+  // varied by lock state would quietly spend that budget here. A plain number, not an expression,
+  // is what makes that unspendable.
+  it('paints both lock states at one radius and one stroke width', () => {
+    const layer = nearbyPoiLayer(fakePalette)
+    expect(layer.paint?.['circle-radius']).toBe(6)
+    expect(layer.paint?.['circle-stroke-width']).toBe(2)
+  })
+
+  it('inverts fill and ring between the two states, and nothing else', () => {
+    const layer = nearbyPoiLayer(fakePalette)
+    const unlocked = dotColors(layer, { category: 'museums', unlocked: true })
+    const locked = dotColors(layer, { category: 'museums', unlocked: false })
+
+    expect(unlocked).toEqual({ fill: fakePalette.categories.museums, ring: fakePalette.stroke })
+    expect(locked).toEqual({ fill: fakePalette.stroke, ring: fakePalette.categories.museums })
+  })
+
+  /**
+   * Anything that is not a literal `true` reads as LOCKED, and the paint still COMPILES — measured
+   * through MapLibre's own expression compiler rather than asserted on the shape of the expression,
+   * which would only restate the source. `['get', 'unlocked']` on its own returns null for a
+   * feature that lacks the property, and `case` rejects a null predicate as a type error that
+   * MapLibre resolves to the paint default: a black dot, not a locked one.
+   *
+   * These inputs are all reachable. A feature can be missing the property because an older payload
+   * is still in the GeoJSON source — and a `queryRenderedFeatures` hit never carries a nullish
+   * property at all, because the source round-trips through vt-pbf, which drops them (see
+   * PoiFeatureProperties). `"true"` is the string a future hand-built feature or a tile-encoded
+   * detour could arrive with.
+   */
+  it('reads every non-true `unlocked` as locked, out of a paint that compiles', () => {
+    const layer = nearbyPoiLayer(fakePalette)
+    const fill = paintEvaluator(layer, 'circle-color')
+    const ring = paintEvaluator(layer, 'circle-stroke-color')
+    const category = Color.parse(fakePalette.categories.museums)
+    const stroke = Color.parse(fakePalette.stroke)
+
+    // The anchor: the two states ARE told apart, so the agreement below is not vacuous.
+    expect(fill({ category: 'museums', unlocked: true })).toEqual(category)
+    expect(ring({ category: 'museums', unlocked: true })).toEqual(stroke)
+
+    const notUnlocked = [
+      { category: 'museums' },
+      { category: 'museums', unlocked: null },
+      { category: 'museums', unlocked: false },
+      { category: 'museums', unlocked: 'true' },
+    ]
+    for (const properties of notUnlocked) {
+      expect(fill(properties)).toEqual(stroke)
+      expect(ring(properties)).toEqual(category)
+    }
   })
 
   // The composable calls this with no argument, so the default is the production path: a layer
@@ -270,8 +458,14 @@ describe('nearbyPoiLayer', () => {
     document.documentElement.style.setProperty('--app-poi-stroke', '#654321')
 
     const layer = nearbyPoiLayer()
-    expect(layer.paint?.['circle-color']).toContain('#123456')
-    expect(layer.paint?.['circle-stroke-color']).toBe('#654321')
+    expect(dotColors(layer, { category: 'museums', unlocked: true })).toEqual({
+      fill: '#123456',
+      ring: '#654321',
+    })
+    expect(dotColors(layer, { category: 'museums', unlocked: false })).toEqual({
+      fill: '#654321',
+      ring: '#123456',
+    })
   })
 })
 
@@ -281,18 +475,83 @@ describe('itemsToFeatureCollection', () => {
     { id: 'b', name: null, category: 'museums', lat: 51.12, lon: 17.04, distanceMeters: 9, unlocked: true },
   ]
 
-  it('emits GeoJSON points with [lon, lat] order and the category property', () => {
+  // Each property is here for a reason and `toEqual` on the whole object is what pins them:
+  // `category` and `unlocked` are what the paint keys on, and `id` is what a hit-test resolves back
+  // to a NearbyItem. `name` and `distanceMeters` complete the payload the milestone specifies, but
+  // the detail sheet (M3-09) reads them off that NearbyItem — a hit cannot be relied on to carry
+  // them at all, see PoiFeatureProperties.
+  it('emits GeoJSON points with [lon, lat] order and every property the map needs', () => {
     const fc = itemsToFeatureCollection(items)
 
     expect(fc.type).toBe('FeatureCollection')
     expect(fc.features).toHaveLength(2)
 
-    const [first] = fc.features
+    const [first, second] = fc.features
     expect(first.geometry).toEqual({ type: 'Point', coordinates: [17.03, 51.11] })
-    expect(first.properties).toEqual({ category: 'attractions' })
+    expect(first.properties).toEqual({
+      id: 'a',
+      name: 'Rynek',
+      category: 'attractions',
+      distanceMeters: 5,
+      unlocked: false,
+    })
+    // An unnamed POI keeps a null name rather than being dropped or renamed, and `unlocked` is
+    // carried per feature straight off the server's answer.
+    expect(second.properties).toEqual({
+      id: 'b',
+      name: null,
+      category: 'museums',
+      distanceMeters: 9,
+      unlocked: true,
+    })
   })
 
   it('produces an empty collection for no items', () => {
     expect(itemsToFeatureCollection([])).toEqual({ type: 'FeatureCollection', features: [] })
+  })
+})
+
+describe('hitTestBox', () => {
+  // 22, not 20 or 24: the box is +/- half the frozen 44 px touch target, and the dot's own 12 px
+  // of it is only a quarter of that floor.
+  it('is the frozen 44 px target expressed as a box around the tap point', () => {
+    expect(HIT_TEST_PADDING_PX).toBe(22)
+    expect(hitTestBox({ x: 100, y: 200 })).toEqual([
+      [78, 178],
+      [122, 222],
+    ])
+  })
+
+  it('stays a box when the tap is at the top-left corner of the canvas', () => {
+    expect(hitTestBox({ x: 0, y: 0 })).toEqual([
+      [-22, -22],
+      [22, 22],
+    ])
+  })
+})
+
+describe('pickPoiHit', () => {
+  it('picks nothing out of an empty box', () => {
+    expect(pickPoiHit([])).toBeNull()
+  })
+
+  it('picks the POI nearest the tap point, not the first one the renderer returned', () => {
+    expect(
+      pickPoiHit([
+        { osmId: 'node/far', distancePx: 21 },
+        { osmId: 'node/near', distancePx: 3 },
+        { osmId: 'node/mid', distancePx: 12 },
+      ]),
+    ).toBe('node/near')
+  })
+
+  // The reason the tie-break exists: `queryRenderedFeatures` returns features in render order, so
+  // two dots at the same screen position would otherwise open a different sheet on each tap. Both
+  // orders must land on the same POI.
+  it('resolves an exact tie by id, whatever order the features arrive in', () => {
+    const a = { osmId: 'node/1', distancePx: 8 }
+    const b = { osmId: 'node/2', distancePx: 8 }
+    expect(pickPoiHit([a, b])).toBe('node/1')
+    expect(pickPoiHit([b, a])).toBe('node/1')
   })
 })

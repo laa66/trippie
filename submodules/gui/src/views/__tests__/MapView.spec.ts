@@ -52,6 +52,9 @@ vi.mock('@/composables/useGeolocation', async () => {
       position: vue.ref({ latitude: 51.1079, longitude: 17.0385 }),
       isFallback: vue.ref(true),
       error: geo.error,
+      // Never a fix here: this spec drives the chrome, and a fix is what would start offering
+      // unlocks. The unlock wiring has its own spec (MapView.unlock.spec.ts).
+      fix: vue.ref(null),
       start: () => {},
       stop: () => {},
     }),

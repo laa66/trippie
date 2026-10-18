@@ -11,6 +11,16 @@ const FIX: GeoFix = { latitude: ORIGIN.lat, longitude: ORIGIN.lon, accuracyMeter
 const REQUIRED: UnlockPolicy = { requireProximity: true }
 const EXEMPT: UnlockPolicy = { requireProximity: false }
 
+/**
+ * The same position, measured again a second later. A fix is identified by its timestamp — one
+ * request per measured position — so "a later fix" has to carry a new stamp. Re-offering the very
+ * same fix is what a pan, a category change and the re-read after a grant all do, and that has to
+ * stay silent.
+ */
+function laterFix(secondsLater = 1): GeoFix {
+  return { ...FIX, timestamp: FIX.timestamp + secondsLater * 1_000 }
+}
+
 function poiAt(id: string, metersNorth: number): NearbyItem {
   return {
     id,
@@ -114,11 +124,91 @@ describe('createUnlockClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect([...client.knownUnlocked]).toEqual([])
 
-    const second = client.attemptUnlock(FIX, items, REQUIRED)
+    const second = client.attemptUnlock(laterFix(), items, REQUIRED)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     settlers[1].ok({ unlocked: ['edge'], refused: [] })
     await second
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * MEDIUM-1 from the M3-08 review, and the other half of the test above. Freeing the in-flight
+   * slot is what a `refused` POI needs and what a throw must not skip — but on its own it lets a
+   * caller that re-offers the SAME fix (which a pan, a category change and the re-read after a
+   * grant all do) buy a second request against a position the device never measured again.
+   */
+  it('sends nothing for a fix it has already sent a request for, whatever the POIs do', async () => {
+    const { fetchMock, settlers } = pendingFetch()
+    const client = createUnlockClient()
+    const edge = poiAt('edge', 49)
+
+    const first = client.attemptUnlock(FIX, [edge], REQUIRED)
+    settlers[0].ok({ unlocked: [], refused: ['edge'] })
+    await first
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // The POI list changed under the fix — a refetch brought a nearer POI, and the refused one is
+    // free again — but the position claim is the same one, so there is nothing new to assert.
+    await expect(client.attemptUnlock(FIX, [edge, poiAt('fresh', 10)], REQUIRED)).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // One new measurement, and both go out — nearest first.
+    const third = client.attemptUnlock(laterFix(), [edge, poiAt('fresh', 10)], REQUIRED)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(sentBody(fetchMock, 1).osmIds).toEqual(['fresh', 'edge'])
+    settlers[1].ok({ unlocked: ['fresh'], refused: ['edge'] })
+    await third
+  })
+
+  /**
+   * The memory records a request SENT, not a fix seen. The first real fix is also what triggers the
+   * first nearby query, so it is routinely evaluated against an empty POI list — and it still has
+   * to be the fix that unlocks whatever arrives a moment later, or a device that stands still and
+   * produces one fix would never unlock anything at all.
+   */
+  it('still offers a fix that evaluated to no candidates when the POIs arrive', async () => {
+    const { fetchMock, settlers } = pendingFetch()
+    const client = createUnlockClient()
+
+    await expect(client.attemptUnlock(FIX, [], REQUIRED)).resolves.toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const attempt = client.attemptUnlock(FIX, [poiAt('near', 10)], REQUIRED)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    settlers[0].ok({ unlocked: ['near'], refused: [] })
+    await attempt
+  })
+
+  /**
+   * Pins the ORDER of the per-fix bookkeeping: the key is recorded with the in-flight ids, before
+   * the await, not after the response lands. The POI here was NOT in the first batch, so `inFlight`
+   * cannot hold it back — only the fix key can. That is a real sequence, not a contrived one: a
+   * debounced `moveend` or a category change can land a nearby answer carrying a new POI while the
+   * first request is still in the air.
+   */
+  it('sends nothing more for a fix whose request is still in flight, not even for a POI it has never seen', async () => {
+    const { fetchMock, settlers } = pendingFetch()
+    const client = createUnlockClient()
+
+    const first = client.attemptUnlock(FIX, [poiAt('near', 10)], REQUIRED)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // Asserted BEFORE awaiting the second attempt: if the key were recorded only after the response
+    // landed, this attempt would put a request in the air and the await below would hang on a
+    // promise nothing settles — a timeout instead of a readable count.
+    const second = client.attemptUnlock(FIX, [poiAt('near', 10), poiAt('newcomer', 20)], REQUIRED)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await expect(second).resolves.toBeNull()
+
+    settlers[0].ok({ unlocked: ['near'], refused: [] })
+    await first
+
+    // The newcomer is not lost, it just rides the next measured position.
+    const next = client.attemptUnlock(laterFix(), [poiAt('newcomer', 20)], REQUIRED)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(sentBody(fetchMock, 1).osmIds).toEqual(['newcomer'])
+    settlers[1].ok({ unlocked: ['newcomer'], refused: [] })
+    await next
   })
 
   it('frees the slot when the request fails, surfacing the failure to the caller', async () => {
@@ -131,7 +221,7 @@ describe('createUnlockClient', () => {
     await expect(first).rejects.toThrow(/network down/)
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    const second = client.attemptUnlock(FIX, items, REQUIRED)
+    const second = client.attemptUnlock(laterFix(), items, REQUIRED)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     settlers[1].ok({ unlocked: ['near'], refused: [] })
     await second
@@ -153,7 +243,7 @@ describe('createUnlockClient', () => {
     await first
 
     // The overflow rides the NEXT fix, not a second request against this same position claim.
-    const second = client.attemptUnlock(FIX, items, REQUIRED)
+    const second = client.attemptUnlock(laterFix(), items, REQUIRED)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(sentBody(fetchMock, 1).osmIds).toEqual(items.slice(MAX_UNLOCK_BATCH).map((i) => i.id))
     settlers[1].ok({ unlocked: [], refused: [] })

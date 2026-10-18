@@ -112,7 +112,34 @@
           <p class="text-xs text-ink-muted">
             Ring = --app-poi-stroke, the same 2px white the map draws. Every dot clears 3:1 against
             it; the closest pair is dE2000 14.4 and none comes nearer than 23.9 to the brand green
-            the user-location marker uses.
+            the user-location marker uses. The dots above are the UNLOCKED state — see below.
+          </p>
+        </section>
+
+        <section class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">POI lock state</h2>
+          <!-- M3-08. The lock state is carried by INVERTING the fill and nothing else: no second
+               hue, no second size, no icon. Shape stays reserved for the category, which is what
+               leaves M6 free to pick any of those to solve colour-blind distinguishability.
+               Shown on viewpoints, the tightest pair in the palette. -->
+          <div class="grid grid-cols-2 gap-2">
+            <div
+              v-for="s in poiLockStates"
+              :key="s.label"
+              class="flex items-center gap-2.5 text-xs text-ink"
+            >
+              <span class="poi-dot shrink-0" :style="s.style" />
+              <span class="min-w-0">
+                <span class="block font-semibold">{{ s.label }}</span>
+                <span class="block text-ink-muted">{{ s.note }}</span>
+              </span>
+            </div>
+          </div>
+          <p class="text-xs text-ink-muted">
+            Same two colours either way round, so the dot-to-ring contrast is the same number in
+            both states — 3.09:1 for viewpoints, the floor-hugging one, 5.70:1 at the other end
+            (sacred). Zero new tokens: the inversion only swaps which of the existing two is the
+            fill.
           </p>
         </section>
 
@@ -180,6 +207,20 @@ const toggles = ref([
 const poiTokens = [
   ...CATEGORY_SLUGS.map((slug) => ({ token: slug.replace('_', '-'), label: CATEGORY_LABELS[slug] })),
   { token: 'unknown', label: 'Fallback (unreachable)' },
+]
+// Both states of one category, built from the same custom properties the map reads: nothing here
+// is a second definition of the inversion, only a view of it.
+const poiLockStates = [
+  {
+    label: 'Unlocked',
+    note: 'fill = category, ring = --app-poi-stroke',
+    style: { background: 'var(--app-poi-viewpoints)', borderColor: 'var(--app-poi-stroke)' },
+  },
+  {
+    label: 'Locked',
+    note: 'fill = --app-poi-stroke, ring = category',
+    style: { background: 'var(--app-poi-stroke)', borderColor: 'var(--app-poi-viewpoints)' },
+  },
 ]
 const brand = [
   { token: 'primary', note: 'action, carries white text (5.13:1)', class: 'bg-primary text-ink-inverse' },

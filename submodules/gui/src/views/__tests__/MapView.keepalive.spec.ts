@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { KeepAlive, defineComponent, h } from 'vue'
+import { KeepAlive, defineComponent, h, type Ref } from 'vue'
+import type { NearbyItem } from '@/lib/nearbyApi'
+import { itemsToFeatureCollection } from '@/lib/poiLayer'
 
 /**
  * MapView is cached by App.vue's <keep-alive :include="['MapView']">, so navigating away no longer
@@ -12,6 +14,9 @@ import { KeepAlive, defineComponent, h } from 'vue'
 
 let mapInstances = 0
 const moveEndListeners = new Set<() => void>()
+// The hit-test listener is the one subscription M3-08 added, so it joins the leak gate: opened in
+// onMounted next to the map, released in onUnmounted next to everything else.
+const clickListeners = new Set<(event: unknown) => void>()
 const flyTo = vi.fn()
 const removeMap = vi.fn()
 let styleLoadListener: (() => void) | null = null
@@ -23,9 +28,11 @@ vi.mock('maplibre-gl', () => {
     }
     on(type: string, listener: () => void) {
       if (type === 'moveend') moveEndListeners.add(listener)
+      if (type === 'click') clickListeners.add(listener)
     }
     off(type: string, listener: () => void) {
       if (type === 'moveend') moveEndListeners.delete(listener)
+      if (type === 'click') clickListeners.delete(listener)
     }
     once(type: string, listener: () => void) {
       if (type === 'load') styleLoadListener = listener
@@ -67,13 +74,31 @@ vi.mock('maplibre-gl', () => {
   return { Map: FakeMap, Marker: FakeMarker }
 })
 
-const fetchNearby = vi.fn(async () => ({ items: [], truncated: false }))
+const fetchNearby = vi.fn(async () => ({ items: [] as NearbyItem[], truncated: false }))
 vi.mock('@/lib/nearbyApi', () => ({ fetchNearby: () => fetchNearby() }))
+// The unlock HTTP boundary; the client, the dedupe memory and the proximity rule are real.
+const postUnlock = vi.fn(async () => ({ unlocked: [] as string[], refused: [] as string[] }))
+vi.mock('@/lib/unlockApi', async (importActual) => ({
+  ...(await importActual<typeof import('@/lib/unlockApi')>()),
+  postUnlock: () => postUnlock(),
+}))
 // Stubbed for one reason: with the real composable, `poiLayer.stop()` has no effect this spec can
 // observe (nearby.stop() already aborts the only thing that could still mutate `items`), so the
 // teardown instruction could be deleted unnoticed. Here it is asserted at the call site.
-const { poiLayerStop } = vi.hoisted(() => ({ poiLayerStop: vi.fn() }))
-vi.mock('@/composables/useNearbyPoiLayer', () => ({ useNearbyPoiLayer: () => ({ stop: poiLayerStop }) }))
+// It also hands back the `items` ref it was given, which is the layer's whole render input: the
+// composable pushes `itemsToFeatureCollection(items.value)` into the source and nothing else
+// (pinned in useNearbyPoiLayer.spec.ts), so running that same function over the captured ref is
+// what the map paints.
+const { poiLayerStop, layer } = vi.hoisted(() => ({
+  poiLayerStop: vi.fn(),
+  layer: { items: null as unknown },
+}))
+vi.mock('@/composables/useNearbyPoiLayer', () => ({
+  useNearbyPoiLayer: (_map: unknown, items: unknown) => {
+    layer.items = items
+    return { stop: poiLayerStop }
+  },
+}))
 vi.mock('@/lib/settingsApi', () => ({ getSettings: vi.fn(() => new Promise(() => {})), putSettings: vi.fn() }))
 
 class FakeResizeObserver {
@@ -87,14 +112,32 @@ vi.stubGlobal('ResizeObserver', FakeResizeObserver)
 const activeWatches = new Set<number>()
 let maxConcurrentWatches = 0
 let nextWatchId = 1
-let positionCallback: ((pos: { coords: { latitude: number; longitude: number } }) => void) | null = null
+interface StubbedPosition {
+  // `accuracy` optional on purpose: a fix without a MEASURED accuracy is not a GeoFix at all, so
+  // the specs that leave it out are also asserting that nothing offers an unlock for one.
+  coords: { latitude: number; longitude: number; accuracy?: number }
+  timestamp?: number
+}
+let positionCallback: ((pos: StubbedPosition) => void) | null = null
+
+/**
+ * A timestamp for one emitted fix. MapView offers an unlock only for a RECENTLY measured fix, and
+ * only once per fix, so a stamp has to be near the wall clock and distinct per emission — two fixes
+ * sharing a timestamp are one fix as far as the unlock path is concerned, which is the point of
+ * MapView.unlock.spec.ts and not of this file.
+ */
+let fixSequence = 0
+function nextFixTimestamp(): number {
+  fixSequence += 1
+  return Date.now() + fixSequence
+}
 
 // Only `geolocation` is swapped: replacing the whole navigator takes userAgent/platform with it
 // and leaves the suite depending on import order.
 Object.defineProperty(navigator, 'geolocation', {
   configurable: true,
   value: {
-    watchPosition(onPosition: (pos: { coords: { latitude: number; longitude: number } }) => void) {
+    watchPosition(onPosition: (pos: StubbedPosition) => void) {
       positionCallback = onPosition
       const id = nextWatchId++
       activeWatches.add(id)
@@ -126,6 +169,7 @@ const Shell = defineComponent({
 beforeEach(() => {
   mapInstances = 0
   moveEndListeners.clear()
+  clickListeners.clear()
   activeWatches.clear()
   maxConcurrentWatches = 0
   styleLoadListener = null
@@ -159,6 +203,7 @@ describe('MapView under KeepAlive', () => {
     // Nothing opened in onMounted was opened a second time.
     expect(mapInstances).toBe(1)
     expect(moveEndListeners.size).toBe(1)
+    expect(clickListeners.size).toBe(1)
     expect(maxConcurrentWatches).toBe(1)
     expect(removeMap).not.toHaveBeenCalled()
 
@@ -174,6 +219,7 @@ describe('MapView under KeepAlive', () => {
     // The cache is gone, so the single full teardown finally runs.
     expect(removeMap).toHaveBeenCalledTimes(1)
     expect(moveEndListeners.size).toBe(0)
+    expect(clickListeners.size).toBe(0)
     expect(activeWatches.size).toBe(0)
   })
 
@@ -195,6 +241,7 @@ describe('MapView under KeepAlive', () => {
     expect(removeMap).toHaveBeenCalledTimes(1)
     expect(activeWatches.size).toBe(0)
     expect(moveEndListeners.size).toBe(0)
+    expect(clickListeners.size).toBe(0)
     expect(poiLayerStop).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
@@ -253,5 +300,122 @@ describe('MapView under KeepAlive', () => {
 
     wrapper.unmount()
     expect(activeWatches.size).toBe(0)
+  })
+
+  /**
+   * The consequence of keeping the view alive that is NOT a leak: the unlock client survives the
+   * deactivation with its dedupe memory intact, and a row could have been written (or never have
+   * existed) on another device meanwhile. So what is painted after a reactivation has to be the
+   * `unlocked` field of the latest nearby answer — never `knownUnlocked`, which is only there to
+   * stop asking twice.
+   *
+   * The test makes the two disagree on purpose: the server grants the unlock, then its answer
+   * after the reactivation says locked. The map must follow the answer, while the client must
+   * still refuse to ask again — which is what proves the paint is not coming from its memory.
+   */
+  it('paints the lock state from the nearby answer after a reactivation, never from its own memory', async () => {
+    const poi: NearbyItem = {
+      id: 'node/1',
+      name: 'Rynek',
+      category: 'museums',
+      lat: 51.1079,
+      lon: 17.0385,
+      distanceMeters: 2,
+      unlocked: false,
+    }
+    const lockedState = async () => ({ items: [poi], truncated: false })
+    const unlockedState = async () => ({ items: [{ ...poi, unlocked: true }], truncated: false })
+    const painted = () =>
+      itemsToFeatureCollection((layer.items as Ref<NearbyItem[]>).value).features.map(
+        (f) => f.properties?.unlocked,
+      )
+
+    fetchNearby
+      .mockImplementationOnce(lockedState)
+      .mockImplementationOnce(unlockedState)
+      .mockImplementationOnce(lockedState)
+    postUnlock.mockImplementationOnce(async () => ({ unlocked: [poi.id], refused: [] }))
+
+    const wrapper = mount(Shell, { props: { showMap: true } })
+    await flushPromises()
+
+    // A MEASURED fix, at the POI: the only input the unlock path accepts.
+    const atThePoi = () =>
+      positionCallback?.({
+        coords: { latitude: poi.lat, longitude: poi.lon, accuracy: 7 },
+        timestamp: nextFixTimestamp(),
+      })
+
+    // The fix queries nearby, and the answer landing is what offers the unlock — the grant is then
+    // read back from the server rather than patched into the features in hand.
+    atThePoi()
+    await flushPromises()
+    expect(postUnlock).toHaveBeenCalledTimes(1)
+    expect(fetchNearby).toHaveBeenCalledTimes(2)
+    expect(painted()).toEqual([true])
+
+    // /map -> /settings -> /map. The client (and its memory of this POI) survives; the GPS watch
+    // does not — so the reactivation re-read is the only thing that can correct the state, and the
+    // server now answers that this POI is locked (a row that was never this user's, or one gone).
+    await wrapper.setProps({ showMap: false })
+    await flushPromises()
+    expect(activeWatches.size).toBe(0)
+    await wrapper.setProps({ showMap: true })
+    await flushPromises()
+
+    expect(mapInstances).toBe(1)
+    expect(fetchNearby).toHaveBeenCalledTimes(3)
+    expect(painted()).toEqual([false])
+
+    // ... and the client has NOT forgotten its grant: a further fix sends no second request for
+    // the same POI. So the locked paint above came from the answer, not from the memory.
+    atThePoi()
+    await flushPromises()
+    expect(postUnlock).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+    expect(clickListeners.size).toBe(0)
+  })
+
+  // The two halves of the reactivation re-read, which `onActivated` alone cannot separate: Vue
+  // fires it right after the first mount too, and querying there would race the query the first
+  // real fix makes. So the mount must not fetch, and one away-and-back must fetch exactly once.
+  it('re-reads nearby once when the view comes back, and never on the mount itself', async () => {
+    const poi: NearbyItem = {
+      id: 'node/2',
+      name: 'Daleko',
+      category: 'viewpoints',
+      lat: 51.2,
+      lon: 17.2,
+      distanceMeters: 4000,
+      unlocked: false,
+    }
+    // Once-implementations, not a persistent one: nothing in this file may inherit a payload.
+    const withThePoi = async () => ({ items: [poi], truncated: false })
+    fetchNearby.mockImplementationOnce(withThePoi).mockImplementationOnce(withThePoi)
+
+    const wrapper = mount(Shell, { props: { showMap: true } })
+    await flushPromises()
+    expect(fetchNearby).not.toHaveBeenCalled()
+
+    // One measured fix, so there are POIs on screen whose state could go stale while hidden. The
+    // POI is 10 km off, so nothing is offered for unlock and nothing else can refetch.
+    positionCallback?.({
+      coords: { latitude: 51.1079, longitude: 17.0385, accuracy: 7 },
+      timestamp: nextFixTimestamp(),
+    })
+    await flushPromises()
+    expect(fetchNearby).toHaveBeenCalledTimes(1)
+    expect(postUnlock).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ showMap: false })
+    await flushPromises()
+    expect(fetchNearby).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ showMap: true })
+    await flushPromises()
+    expect(fetchNearby).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
   })
 })

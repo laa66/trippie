@@ -65,10 +65,15 @@ import {
   QPageSticky,
 } from 'quasar'
 import { symRoundedTune } from '@quasar/extras/material-symbols-rounded'
-import { Map as MapLibreMap, Marker } from 'maplibre-gl'
-import { useGeolocation, WROCLAW_FALLBACK } from '@/composables/useGeolocation'
+import { Map as MapLibreMap, Marker, type MapMouseEvent } from 'maplibre-gl'
+import { useGeolocation, WROCLAW_FALLBACK, type GeoFix } from '@/composables/useGeolocation'
 import { useNearbyPois, type UseNearbyPois } from '@/composables/useNearbyPois'
 import { useNearbyPoiLayer, type UseNearbyPoiLayer } from '@/composables/useNearbyPoiLayer'
+import { useCategorySelection } from '@/composables/useCategorySelection'
+import { createUnlockClient, type UnlockClient } from '@/lib/unlockClient'
+import type { UnlockResponse } from '@/lib/unlockApi'
+import { POI_LAYER_ID, hitTestBox, pickPoiHit, type PoiHit } from '@/lib/poiLayer'
+import type { NearbyItem } from '@/lib/nearbyApi'
 import { tileStyleUrl } from '@/lib/tiles'
 import AppNotice from '@/components/ui/AppNotice.vue'
 import CategoryFilter from '@/components/CategoryFilter.vue'
@@ -95,15 +100,77 @@ const OSM_ATTRIBUTION = '&copy; OpenStreetMap contributors'
 // Load-bearing: App.vue's <keep-alive :include="['MapView']"> matches on the component name.
 defineOptions({ name: 'MapView' })
 
+/**
+ * Unlock error suppression: after this many CONSECUTIVE failed attempts the path goes silent for
+ * {@link UNLOCK_ERROR_COOLDOWN_MS}, and any answer that came back from the server clears the
+ * streak.
+ *
+ * Why anything at all: `unlockClient` deliberately does not swallow its exceptions — its `finally`
+ * has to free the in-flight slot so a `refused` POI can be offered again once the user has walked
+ * closer — so the loop only materialises here, where the attempt is driven by the ~1 Hz fix
+ * stream. Measured in M3-07: a permanent 400 produced one request per fix, 20 requests for 20
+ * fixes.
+ *
+ * Why a STREAK and not silence after the first error: a single stray 5xx, or a 401 landing while
+ * the refresh rotates, would otherwise mute unlocking for the whole cooldown — ~40 m of walking,
+ * which is about the entire window a POI stays in range for. Three failures in a row is the signal
+ * that the endpoint rather than the moment is broken. The cooldown then bounds the request RATE
+ * instead of giving up, and because the client keeps asking after each silence, the first answer it
+ * gets resets the streak — no other event has to revive it.
+ *
+ * `refused` ids are an ANSWER, not a failure: at the radius edge they are the expected one (see
+ * UNLOCK_RADIUS_METERS), so a 200 clears the streak whatever is in it and arms nothing.
+ */
+const UNLOCK_ERROR_STREAK_LIMIT = 3
+const UNLOCK_ERROR_COOLDOWN_MS = 30_000
+
+/**
+ * How old a fix may be when it is offered for unlocking.
+ *
+ * {@link offerUnlock} has TWO entry points and only one of them is a position measurement: the
+ * other is the `nearby` answer landing, which happens on a pan, a category change, a reactivation
+ * and on the refresh after a grant. Nothing clears `fix` either — neither a later geolocation
+ * error nor `stop()` (the watch is paused whenever this view is hidden) — so without this bound a
+ * fix measured long ago would keep being sent as the user's current position. At the ~1 Hz
+ * `watchPosition` rate this never touches a normal walk: a fix is milliseconds old when either
+ * entry point offers it, and 30 s is two orders of magnitude of slack on that.
+ *
+ * This is APPLICATION HONESTY, not a security control. The server is never told when the position
+ * was measured, so a hand-written `curl` asserting a position still passes the 50 m gate on the
+ * server's own terms — that is intended, and M3-10 verifies it deliberately. What this closes is
+ * our own client claiming a position nothing has measured recently.
+ */
+const MAX_FIX_AGE_MS = 30_000
+
 const isFilterOpen = ref(false)
 const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
+/**
+ * The POI the user last tapped, or null. Internal to this view: the sheet that renders it (M3-09)
+ * goes into the template below, next to `CategoryFilter`, and binds to this through `:poi` /
+ * `@close` — so there is nothing here for a parent to read, and nothing to expose. It always holds
+ * an item straight out of the latest `nearby` response, so the lock state it shows is the
+ * server's, never a local guess.
+ */
+const selectedPoi = ref<NearbyItem | null>(null)
+
 let map: MapLibreMap | null = null
 let userMarker: Marker | null = null
 let nearby: UseNearbyPois | null = null
 let poiLayer: UseNearbyPoiLayer | null = null
+let unlock: UnlockClient | null = null
+let unlockAbort: AbortController | null = null
+let unlockMutedUntil = 0
+let unlockErrorStreak = 0
 let firstFixDone = false
+// Set by onDeactivated, consumed by onActivated: the two are not symmetric, because Vue also
+// fires `activated` immediately after the initial mount. See onActivated.
+let wasDeactivated = false
 
-const { position, isFallback, error: geoError, start, stop } = useGeolocation()
+const { position, isFallback, error: geoError, fix, start, stop } = useGeolocation()
+// The module-level ref itself, deliberately: `requireProximity` is read off it at the moment of
+// each attempt (below), because the user can flip the toggle in /settings and come back without
+// MapView ever being remounted.
+const { requireProximity } = useCategorySelection()
 
 // Built in JS because MapLibre takes a DOM element, not a template — but the colours still come
 // from the token layer (`bg-primary`, `border-ink-inverse`), so the marker re-themes with
@@ -121,6 +188,105 @@ function createUserMarkerElement(): HTMLElement {
 
   wrapper.append(ring, core)
   return wrapper
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
+}
+
+/**
+ * Offers the POIs this fix may unlock. Takes the fix as an argument rather than reading the ref,
+ * so what is evaluated is the value the watcher fired for.
+ *
+ * The policy is built HERE, per attempt, and never handed to the client once at construction: the
+ * toggle lives in a module-level ref and flips without a remount, so a captured copy would keep
+ * enforcing the old setting for the rest of the session.
+ *
+ * The three gates below are the ones that depend on WHEN we are, which is why they are here and
+ * not in `proximity.ts`: that module stays a pure function of a position and a POI list, with no
+ * clock injected into it. The suppression window and the fix age ({@link MAX_FIX_AGE_MS}) read the
+ * wall clock; whether a request has already gone out for this very fix is the client's own memory,
+ * keyed on the fix timestamp.
+ *
+ * On a grant we re-read `nearby` instead of patching the features we already have. The rows are
+ * the server's, they are rare (a handful per walk), and a client-side unlock cache tied to the
+ * view is exactly what the milestone forbids — the row also outlives the viewport and the category
+ * filter, which only a re-read reflects.
+ */
+async function offerUnlock(current: GeoFix | null): Promise<void> {
+  if (!unlock || !nearby || current === null) return
+  if (Date.now() < unlockMutedUntil) return
+  if (Date.now() - current.timestamp > MAX_FIX_AGE_MS) return
+
+  // Only the request is guarded. Anything after it (the re-read, the bookkeeping) is OUR code: a
+  // bug there must not be counted as a failing endpoint, and must not be swallowed into a silence
+  // that looks like one.
+  let response: UnlockResponse | null
+  try {
+    response = await unlock.attemptUnlock(
+      current,
+      nearby.items.value,
+      { requireProximity: requireProximity.value },
+      unlockAbort?.signal,
+    )
+  } catch (err) {
+    // An abort is the view being torn down, not a failing endpoint.
+    if (!isAbortError(err)) {
+      unlockErrorStreak += 1
+      if (unlockErrorStreak >= UNLOCK_ERROR_STREAK_LIMIT) {
+        unlockErrorStreak = 0
+        unlockMutedUntil = Date.now() + UNLOCK_ERROR_COOLDOWN_MS
+      }
+    }
+    return
+  }
+
+  // Nothing went out: no candidates for this fix, or a request has already been sent for it (the
+  // client's own per-fix memory). Neither is an answer, so neither clears the streak.
+  if (response === null) return
+  unlockErrorStreak = 0
+
+  // Re-checked AFTER the await: `onUnmounted` nulls this while a request can still be in flight,
+  // and the narrowing at the top of the function is long stale by here.
+  if (nearby === null) return
+  if (response.unlocked.length > 0) {
+    nearby.refresh()
+  }
+}
+
+/**
+ * Resolves a tap to at most one POI. A 6 px dot is a 12 px target against a frozen 44 px floor, so
+ * the query is a box around the tap point ({@link hitTestBox}) rather than the point itself — the
+ * dot keeps its designed radius and the map keeps its single layer.
+ *
+ * LOCKED POIs are selectable too (frozen decision #5): a tap that does nothing reads as a broken
+ * app, not as a locked POI. The sheet shows a different thing, it is not absent.
+ */
+function onMapClick(event: MapMouseEvent): void {
+  if (!map || !map.getLayer(POI_LAYER_ID)) return
+
+  const hits: PoiHit[] = []
+  for (const feature of map.queryRenderedFeatures(hitTestBox(event.point), {
+    layers: [POI_LAYER_ID],
+  })) {
+    const osmId: unknown = feature.properties?.id
+    if (typeof osmId !== 'string' || feature.geometry.type !== 'Point') continue
+    const [lon, lat] = feature.geometry.coordinates
+    const centre = map.project([lon, lat])
+    hits.push({
+      osmId,
+      distancePx: Math.hypot(centre.x - event.point.x, centre.y - event.point.y),
+    })
+  }
+
+  const picked = pickPoiHit(hits)
+  // Nothing under the box: a tap on bare map dismisses the selection rather than leaving a sheet
+  // open over a POI the user has moved away from.
+  selectedPoi.value = picked === null ? null : findItem(picked)
+}
+
+function findItem(osmId: string): NearbyItem | null {
+  return nearby?.items.value.find((item) => item.id === osmId) ?? null
 }
 
 // Everything that must exist exactly once lives here: under KeepAlive this runs on the first
@@ -141,6 +307,30 @@ onMounted(() => {
 
   nearby = useNearbyPois(map)
   poiLayer = useNearbyPoiLayer(map, nearby.items)
+  unlock = createUnlockClient()
+  unlockAbort = new AbortController()
+
+  map.on('click', onMapClick)
+
+  // Re-points the selection at the item the LATEST response carries, so an unlock that landed
+  // (here or on another device) reaches an open sheet. The id is the only thing kept across the
+  // refetch; everything shown comes from the new payload. A POI that left the result — panned
+  // away, or filtered out — has no dot behind it any more, so the selection goes with it.
+  watch(nearby.items, () => {
+    if (selectedPoi.value !== null) {
+      selectedPoi.value = findItem(selectedPoi.value.id)
+    }
+    // The SECOND entry point into the same attempt — one function, called from both watchers, so
+    // the dedupe, the policy read and the error cooldown are shared rather than duplicated.
+    //
+    // It is needed because the first real fix is also what triggers the first nearby query: when
+    // that fix is evaluated there are no POIs yet, so without this the earliest possible unlock
+    // would be the NEXT fix — and a device standing still that produces exactly one fix would
+    // never unlock anything at all. `fix === null` still means zero requests, which is the
+    // fallback trap approached from this side: POIs arriving while the position is the fallback
+    // offer nothing, because there is no GeoFix to offer them with.
+    void offerUnlock(fix.value)
+  })
 
   start()
 })
@@ -154,6 +344,22 @@ onMounted(() => {
 onActivated(() => {
   if (!map) return
   start()
+
+  // A RE-activation, not the activation that follows the first mount — the flag is the only thing
+  // that tells them apart, and the mount path must not query: the first real fix does that, and a
+  // query from here would race it.
+  //
+  // Why re-read at all: the GPS watch was paused while hidden, so nothing could have refreshed the
+  // lock state, and a row may have been written on another device in the meantime (the unlock is
+  // server state, and `knownUnlocked` is only a dedupe memory). Only the POIs currently rendered
+  // have a state that can have gone stale under us; with none, there is nothing to re-read and the
+  // next fix, pan or filter change queries anyway.
+  if (wasDeactivated) {
+    wasDeactivated = false
+    if (nearby !== null && nearby.items.value.length > 0) {
+      nearby.refresh()
+    }
+  }
 })
 
 // The dialog is teleported to <body>, so it does not go away with the view's DOM: left open, it
@@ -161,6 +367,22 @@ onActivated(() => {
 onDeactivated(() => {
   stop()
   isFilterOpen.value = false
+  // Same reason as the dialog above: the sheet M3-09 binds to this is teleported too, so a
+  // selection left standing would float over whatever renders next.
+  selectedPoi.value = null
+  wasDeactivated = true
+})
+
+// A position MEASUREMENT, which is one of the two entry points into an attempt (the other is the
+// `nearby` answer landing, above). Whichever one fires, what is offered is a `GeoFix` and NEVER
+// `position`: `position` legitimately holds WROCLAW_FALLBACK, which sits in the middle of the
+// old-town POI cluster, and a `GeoFix` cannot be built from it at all (see proximity.ts and
+// unlockFallbackTrap.spec.ts). Because the other entry point can fire long after the last
+// measurement, `offerUnlock` bounds the fix's AGE (see MAX_FIX_AGE_MS) — this watcher is the only
+// thing that ever produces a new one. The marker and the camera below stay on `position` — that is
+// the one thing the fallback is for.
+watch(fix, (current) => {
+  void offerUnlock(current)
 })
 
 watch(
@@ -193,8 +415,13 @@ onUnmounted(() => {
   poiLayer = null
   nearby?.stop()
   nearby = null
+  unlockAbort?.abort()
+  unlockAbort = null
+  unlock = null
+  selectedPoi.value = null
   userMarker?.remove()
   userMarker = null
+  map?.off('click', onMapClick)
   map?.remove()
   map = null
 })
