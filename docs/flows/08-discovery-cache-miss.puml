@@ -8,11 +8,14 @@ database Redis
 database SpatialDB
 
 Client -> Gateway : GET /spatial/nearby?... (Bearer)
-Gateway -> Spatial : forward (validated)
-Spatial -> Redis : GET key
+Gateway -> Spatial : forward (validated, X-User-Id set)
+Spatial -> Redis : GET key (user-free)
 Redis --> Spatial : miss
 Spatial -> SpatialDB : ST_DWithin + category IN (...) ORDER BY distance
 SpatialDB --> Spatial : rows
-Spatial -> Redis : SET key = result (TTL)
-Spatial --> Client : 200 [POIs] (locked)
+Spatial -> Redis : SET key = result (user-free, TTL)
+Spatial -> SpatialDB : poi_unlock WHERE user_id = ? AND osm_id = ANY(ids)\n(decoration AFTER the cache, per user)
+SpatialDB --> Spatial : unlocked osm_ids of this user
+Spatial --> Client : 200 [POIs] (unlocked flag per user)
+note right of Spatial : the cached value and its key carry no user data;\nuserId is a separate port argument and never enters the cache unit.
 @enduml

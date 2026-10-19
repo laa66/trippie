@@ -63,6 +63,7 @@ package "Backend (Microservices, Java)" {
     [API Gateway] as Gateway
     [Auth Service] as Auth
     [Spatial Service] as Spatial
+    note right of Spatial : Geo queries + per-user unlock facts.\nWrites only on unlock; knows the user\nonly as an opaque UUID (no FK).
     [Content Service] as Content
 
     queue "RabbitMQ\n(behind messaging port -> Kafka [LATER])" as Queue
@@ -73,7 +74,7 @@ package "Backend (Microservices, Java)" {
 }
 
 package "Data Layer (DB-per-service, one Postgres cluster)" {
-    database "spatial_db\n(PostGIS)" as SpatialDB
+    database "spatial_db\n(PostGIS: location_point,\npoi_unlock)" as SpatialDB
     database "auth_db" as AuthDB
     database "content_db" as ContentDB
     database "Redis (Cache & Gen State)" as Redis
@@ -102,11 +103,17 @@ Gateway --> Redis : Check access-token denylist
 Auth --> AuthDB : Users, settings (content mode, categories)
 Auth --> Redis : Refresh tokens (rotation) + denylist
 
-' Discovery (spatial is pure geo)
-Gateway --> Spatial : Discover nearby POIs (+ selected categories)
+' Discovery (cache holds user-free results; unlocked flag is decorated after it)
+Gateway --> Spatial : Discover nearby POIs (+ selected categories, X-User-Id)
 Spatial --> Redis : 1. Check spatial cache
 Spatial --> SpatialDB : 2. ST_DWithin + category filter on miss
 Spatial --> Redis : 3. Cache result
+Spatial --> SpatialDB : 4. poi_unlock lookup (per user, after cache)
+
+' Proximity unlock (server-side grant, fail-closed preference read)
+Gateway --> Spatial : Unlock POIs (position claim + accuracy, batch)
+Spatial --> Auth : requireProximity (GET /settings, 1 s, fail-closed)
+Spatial --> SpatialDB : ST_DWithin 50 m gate + idempotent grant (poi_unlock)
 
 ' Content generation (orchestrated by Content, NOT Spatial)
 ' Only for unlocked POIs. Mode = TEXT / AUDIO / BOTH.

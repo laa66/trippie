@@ -1,22 +1,35 @@
 @startuml
-title 9. Proximity unlock (client-side)
+title 9. Proximity unlock (measured fix -> server grant)
 autonumber
 actor User
 participant "Geolocation" as GPS
 participant Client
 participant Gateway
 participant Spatial
+participant Auth
+database SpatialDB
 
 User -> Client : walking
-GPS -> Client : watchPosition update
-Client -> Client : recompute distance to each visible POI
-alt entered any POI unlock radius
-    Client -> Client : mark POI unlocked (enable tap)
+GPS -> Client : watchPosition fix (lat, lon, accuracy, timestamp)
+Client -> Client : evaluate the MEASURED fix only\n(accuracy finite and > 0; if proximity required:\naccuracy <= 100 and distance < 50 m;\nskip known and in-flight POIs)
+alt no candidates, or this fix was already sent
+    Client -> Client : nothing sent
+else candidates (max 50, nearest first)
+    Client -> Gateway : POST /api/spatial/locations/unlock\n{lat, lon, accuracyMeters, osmIds[]} (Bearer)
+    Gateway -> Gateway : validate JWT, set X-User-Id
+    Gateway -> Spatial : forward (StripPrefix=2)
+    Spatial -> Spatial : validate boundary (ranges, accuracy, 1..50 ids)
+    Spatial -> Auth : GET /settings (X-User-Id, 1 s budget)
+    Auth --> Spatial : 200 { requireProximity }
+    note right of Spatial : fail-closed: timeout, 4xx/5xx, empty or\nunreadable payload => requireProximity = true
+    alt requireProximity and accuracyMeters > 100
+        Spatial --> Client : 422 (whole request, nothing written)
+    else
+        Spatial -> SpatialDB : one statement: INSERT poi_unlock\nSELECT FROM location_point WHERE osm_id = ANY(?)\nAND (exempt OR ST_DWithin(geom, point, 50))\nON CONFLICT (user_id, osm_id) DO UPDATE (no-op)\nRETURNING + UNION already-unlocked rows of this user
+        SpatialDB --> Spatial : osm_ids unlocked for this user
+        Spatial --> Client : 200 { unlocked[], refused[] }
+    end
+    Client -> Client : add to known-unlocked, release in-flight ids
 end
-alt moved beyond current query bounds
-    Client -> Gateway : GET /spatial/nearby (new position)
-    Gateway -> Spatial : forward
-    Spatial --> Client : refreshed POIs
-end
-note right of Client : unlock is client-side (MVP).\nPersisted unlock = open question.
+note right of Client : refused is normal (edge of the radius, unknown id).\nNo retry in place; the next measured fix may send again.
 @enduml

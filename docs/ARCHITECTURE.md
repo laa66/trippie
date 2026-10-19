@@ -197,7 +197,7 @@ every other colour, so a dark theme redefines it the same way.
 | Tile server | tileserver (OSM mbtiles/pbf) | Serves self-hosted vector tiles. |
 | API Gateway | Spring Cloud Gateway | Single entry point; **local** access-JWT validation (JWKS from auth); denylist check; routing to services. |
 | Auth service | Spring Boot | User accounts, access/refresh token issuance + rotation, JWKS, per-user settings (default content mode, selected POI categories). Owns `auth_db`. |
-| Spatial service | Spring Boot + PostGIS (hexagonal) | Pure geo. Nearby-POI queries via `ST_DWithin`, filtered by selected categories, distance-sorted. Cached in Redis. Owns `spatial_db`. |
+| Spatial service | Spring Boot + PostGIS (hexagonal) | Geo queries via `ST_DWithin`, filtered by selected categories, distance-sorted; adds each user's `unlocked` flag outside the cache. Enforces the 50 m proximity unlock server-side and records the grant. Reads `requireProximity` from auth. Cached in Redis. Owns `spatial_db`. |
 | Content service | Spring Boot | Orchestrates generation per mode (`TEXT`/`AUDIO`/`BOTH`); owns generation state; serves existing content keyed by POI + mode. Owns `content_db`. |
 | Content worker | Spring Boot | Consumes tasks; generates text (Gemini) and, for `AUDIO`/`BOTH`, audio (ElevenLabs) → R2; persists results. |
 | spatial-loader | Go + pgx | Offline **batch** job (dev + prod, **off the request path**). Transforms OSM GeoJSON into `location_point` (upsert by `osm_id`). Run on demand / scheduled, not a runtime service. |
@@ -237,7 +237,9 @@ The loader derives each POI's `category` from its tags during ingestion.
 One PostgreSQL cluster, one logical database per service (DB-per-service):
 
 - **`spatial_db`** (PostgreSQL + **PostGIS**) — POIs (`location_point`, GiST on `geom`,
-  indexed `category`). Owned by spatial service.
+  indexed `category`) and per-user unlock facts (`poi_unlock`: one row per `(user_id, osm_id)`,
+  `unlocked_at`, `granted_by` = `PROXIMITY` | `EXEMPT`, FK to `location_point`). `user_id` is the
+  opaque UUID from `X-User-Id`; there is no FK to auth. Owned by spatial service.
 - **`auth_db`** (PostgreSQL) — users + per-user settings (default content mode, selected
   categories). Owned by auth. No PostGIS.
 - **`content_db`** (PostgreSQL) — generated content metadata keyed by POI + mode (text, audio
@@ -261,8 +263,23 @@ rotation) mints a new pair. Every other request carries the access JWT, validate
 the gateway (JWKS) with a denylist check in Redis.
 
 **Discovery** — `Gateway → Spatial` with position + selected categories: check Redis cache →
-`ST_DWithin` filtered by category on miss → cache → return. POIs come back locked; the client
-unlocks those within the unlock radius as the user moves.
+`ST_DWithin` filtered by category on miss → cache → return. The cache holds only the user-free
+result for `(position, radius, categories)`. The per-user `unlocked` flag is added after the cache,
+from `poi_unlock`, so no user's unlock state enters a cached payload or its key, and the cache key
+keeps the shape frozen for M6.
+
+**Unlock** — `Client → Gateway → Spatial`: `POST /locations/unlock` with one measured position
+(`lat`, `lon`, `accuracyMeters`) and up to 50 POI ids. The client decides only on a measured fix,
+never on the map centre, so the fallback position cannot unlock anything. The server is the
+enforcement point: it reads the user's `requireProximity` from auth (`GET /settings`, 1 s budget,
+fail-closed: any failure means "required"), then grants in one statement. A POI is granted when it
+exists and lies within 50 m (`ST_DWithin`; the edge is treated as exclusive, as measured in M3-04
+and mirrored by the client's `< 50`), or unconditionally when the user has turned the requirement off
+(`granted_by = EXEMPT`). With the requirement on, an `accuracyMeters` above 100 rejects the whole
+request (422). Grants are idempotent: a repeat returns
+the POI as unlocked and does not rewrite `unlocked_at` or `granted_by`. The response is state:
+`unlocked` includes POIs unlocked earlier, and `refused` means only "too far away, or no such POI".
+Unlocks are persisted per user and never revoked; there is no re-lock.
 
 **Generation** — `Gateway → Content` with a POI id + content mode: return existing content for
 that POI + mode, or enqueue a task + set `Processing`. `Queue → Worker`: Gemini (text) and,
@@ -271,9 +288,11 @@ for `AUDIO`/`BOTH`, ElevenLabs (audio) → R2 (upload) → DB (save text and/or 
 
 ## Boundaries / responsibilities
 
-- **Spatial service stays pure geo.** It does not orchestrate content generation.
-  All generation concerns live in Content service + Content worker. (This corrects the earlier
-  design where spatial owned the generation queue.)
+- **Spatial service owns geometry and the unlock facts derived from it.** It does not orchestrate
+  content generation. All generation concerns live in Content service + Content worker. (This
+  corrects the earlier design where spatial owned the generation queue.) Spatial is the only
+  writer of unlock state: a predicate that needs geometry is enforced where the geometry lives.
+  It holds no user data beyond the opaque user id.
 - **Gateway is the only public entry point.** Services trust internal invariants; validation
   happens at the gateway (auth) and at service boundaries (input DTOs).
 
@@ -314,13 +333,13 @@ Target is Kubernetes. The design avoids Spring-level infrastructure that duplica
 ## Open questions
 
 - Audio format/bitrate and caching/TTL strategy for generated content.
-- Unlock radius value, and whether unlocking is transient (only while near) or persisted per user
-  (once visited, stays unlocked). Where unlock state lives if persisted (auth/user service vs client).
 - Content-mode override: whether per-POI overrides are remembered or one-off.
 - Retry policy specifics (max attempts, backoff) and DLQ handling / reprocessing.
 
 Resolved (see `flows/`): status delivery = polling for MVP (SSE later); generation
-dedup = Redis `SET NX` per (poiId, mode); failures = capped retry + DLQ + `FAILED` status.
+dedup = Redis `SET NX` per (poiId, mode); failures = capped retry + DLQ + `FAILED` status;
+unlock radius = 50 m with an exclusive edge, unlocking is persisted per user (never revoked)
+in `spatial_db.poi_unlock` and granted server-side (see "Unlock" under Request flows).
 Tiles = **tileserver-gl** served from an mbtiles seed **generated by Planetiler** (`basemap`
 profile → OpenMapTiles schema) out of the Geofabrik *dolnośląskie* extract, cropped to a
 Wrocław bbox. Built via a `make tiles` target into `infra/tiles/wroclaw.mbtiles` (gitignored,

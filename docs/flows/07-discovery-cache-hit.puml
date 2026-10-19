@@ -5,12 +5,16 @@ participant Client
 participant Gateway
 participant Spatial
 database Redis
+database SpatialDB
 
 Client -> Gateway : GET /spatial/nearby?lat&lon&radius&categories (Bearer)
 Gateway -> Gateway : validate JWT
-Gateway -> Spatial : forward
+Gateway -> Spatial : forward (X-User-Id set)
 Spatial -> Spatial : build cache key\n(rounded geohash + radius + categories)
 Spatial -> Redis : GET key
-Redis --> Spatial : cached POIs
-Spatial --> Client : 200 [POIs] (all marked locked)
+Redis --> Spatial : cached POIs (user-free)
+Spatial -> SpatialDB : poi_unlock WHERE user_id = ? AND osm_id = ANY(ids)\n(decoration AFTER the cache, per user)
+SpatialDB --> Spatial : unlocked osm_ids of this user
+Spatial --> Client : 200 [POIs] (unlocked flag per user)
+note right of Spatial : the cache key has no user dimension and is unchanged;\nthe per-user flag is never written into the cached payload.
 @enduml
