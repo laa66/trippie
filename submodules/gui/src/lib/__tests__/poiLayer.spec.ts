@@ -478,8 +478,9 @@ describe('itemsToFeatureCollection', () => {
   // Each property is here for a reason and `toEqual` on the whole object is what pins them:
   // `category` and `unlocked` are what the paint keys on, and `id` is what a hit-test resolves back
   // to a NearbyItem. `name` and `distanceMeters` complete the payload the milestone specifies, but
-  // the detail sheet (M3-09) reads them off that NearbyItem — a hit cannot be relied on to carry
-  // them at all, see PoiFeatureProperties.
+  // nothing reads either of them back off a rendered feature: the sheet takes `name` from that
+  // NearbyItem, and its distance is measured by MapView from the user's fix, not taken from here —
+  // this one is the server's, from the nearby query centre. See PoiFeatureProperties.
   it('emits GeoJSON points with [lon, lat] order and every property the map needs', () => {
     const fc = itemsToFeatureCollection(items)
 

@@ -144,6 +144,21 @@
         </section>
 
         <section class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">POI sheet content</h2>
+          <!-- M3-09. The three states of the sheet's content area, in precedence order; the same
+               function the sheet calls, so the texts cannot drift from the real ones. -->
+          <div class="space-y-2 rounded-card bg-sunken p-4">
+            <div v-for="s in poiSheetStates" :key="s.label" class="space-y-1">
+              <p class="text-xs text-ink-muted">{{ s.label }}</p>
+              <app-notice v-if="s.content" :variant="s.content.variant" role="status">
+                {{ s.content.text }}
+              </app-notice>
+              <p v-else class="text-sm text-ink">Pusty obszar zarezerwowany pod przewodnik (M4).</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="space-y-3">
           <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Map chrome</h2>
           <!-- A notice floating over the map (MapView's geolocation banner) is the same AppNotice
                the forms use, plus shadow-raised: the tint is opaque, so it stays readable over
@@ -189,10 +204,22 @@ import {
 import AppLogo from '@/components/ui/AppLogo.vue'
 import AppNotice from '@/components/ui/AppNotice.vue'
 import { CATEGORY_LABELS, CATEGORY_SLUGS } from '@/composables/useCategorySelection'
+import { poiContentMessage } from '@/lib/poiDetail'
 
 // The canvas for M2.5-06: states that are awkward to reach on a live screen (a field in error, a
 // button mid-request) sit here side by side. Dev-only route, dynamically imported, so it never
 // reaches the production bundle.
+// Same function the sheet calls, so these cannot drift from the real copy. The last two rows are
+// the states that used to read as a fault or as a lie: a tooling fix reports `accuracy: 0`, and an
+// EXEMPT user has neither a radius nor a ceiling to meet, so nothing blocking is true for them.
+const poiSheetStates = [
+  { label: 'Odblokowany', content: poiContentMessage(true, 20, true) },
+  { label: 'Zablokowany, dokładność zdegradowana', content: poiContentMessage(false, 140, true) },
+  { label: 'Zablokowany, dokładność dobra', content: poiContentMessage(false, 20, true) },
+  { label: 'Zablokowany, brak pomiaru', content: poiContentMessage(false, null, true) },
+  { label: 'Zablokowany, dokładność 0 (CDP/Playwright)', content: poiContentMessage(false, 0, true) },
+  { label: 'Zablokowany, bliskość NIE wymagana', content: poiContentMessage(false, 140, false) },
+]
 const mode = ref('AUDIO')
 const modes = [
   { value: 'TEXT', label: 'Tekst' },

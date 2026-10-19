@@ -46,13 +46,20 @@
           />
         </q-page-sticky>
         <category-filter v-model="isFilterOpen" />
+        <poi-detail-sheet
+          :poi="selectedPoi"
+          :accuracy-meters="fix?.accuracyMeters ?? null"
+          :distance-from-fix-meters="selectedDistanceMeters"
+          :require-proximity="requireProximity"
+          @close="selectedPoi = null"
+        />
       </q-page>
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup lang="ts">
-import { onActivated, onDeactivated, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import {
   QLayout,
   QHeader,
@@ -74,9 +81,11 @@ import { createUnlockClient, type UnlockClient } from '@/lib/unlockClient'
 import type { UnlockResponse } from '@/lib/unlockApi'
 import { POI_LAYER_ID, hitTestBox, pickPoiHit, type PoiHit } from '@/lib/poiLayer'
 import type { NearbyItem } from '@/lib/nearbyApi'
+import { haversineMeters } from '@/lib/geo'
 import { tileStyleUrl } from '@/lib/tiles'
 import AppNotice from '@/components/ui/AppNotice.vue'
 import CategoryFilter from '@/components/CategoryFilter.vue'
+import PoiDetailSheet from '@/components/PoiDetailSheet.vue'
 import AttributionInfo from '@/components/AttributionInfo.vue'
 import LogoutButton from '@/components/LogoutButton.vue'
 
@@ -152,6 +161,20 @@ const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
  * server's, never a local guess.
  */
 const selectedPoi = ref<NearbyItem | null>(null)
+
+/**
+ * How far the user is from the selected POI, measured from THEIR fix — not `item.distanceMeters`,
+ * which the server measures from the centre of the nearby query (the map centre, which the camera
+ * only keeps on the user while real fixes keep arriving). Same measurement the unlock gate uses,
+ * so the sheet's number and its "come within 50 m" line can never contradict each other. No fix,
+ * no number.
+ */
+const selectedDistanceMeters = computed(() => {
+  const poi = selectedPoi.value
+  const current = fix.value
+  if (poi === null || current === null) return null
+  return haversineMeters({ lat: current.latitude, lon: current.longitude }, { lat: poi.lat, lon: poi.lon })
+})
 
 let map: MapLibreMap | null = null
 let userMarker: Marker | null = null

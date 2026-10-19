@@ -159,7 +159,12 @@ export interface PoiFeatureProperties {
   id: string
   name: string | null
   category: string
-  /** As the server measured it, from the nearby query centre. Carried for the detail sheet. */
+  /**
+   * As the server measured it, from the centre of the `nearby` query — NOT from the user. Required
+   * by M3-08's accept, and deliberately not what the detail sheet shows: the sheet measures the
+   * user's own distance from their fix, because the map centre is only on the user while real
+   * fixes keep arriving. Nothing reads this back out of a rendered feature today.
+   */
   distanceMeters: number
   /** Server truth from `nearby`, the only thing the lock state is painted from. */
   unlocked: boolean
