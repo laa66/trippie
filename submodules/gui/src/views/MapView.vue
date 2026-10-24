@@ -48,7 +48,7 @@
         <category-filter v-model="isFilterOpen" />
         <poi-detail-sheet
           :poi="selectedPoi"
-          :accuracy-meters="fix?.accuracyMeters ?? null"
+          :accuracy-meters="sheetFix?.accuracyMeters ?? null"
           :distance-from-fix-meters="selectedDistanceMeters"
           :require-proximity="requireProximity"
           @close="selectedPoi = null"
@@ -134,7 +134,8 @@ const UNLOCK_ERROR_STREAK_LIMIT = 3
 const UNLOCK_ERROR_COOLDOWN_MS = 30_000
 
 /**
- * How old a fix may be when it is offered for unlocking.
+ * How old a fix may be to count as where the user IS — for {@link offerUnlock}, which acts on it,
+ * and for {@link sheetFix}, which is the only thing allowed to describe it.
  *
  * {@link offerUnlock} has TWO entry points and only one of them is a position measurement: the
  * other is the `nearby` answer landing, which happens on a pan, a category change, a reactivation
@@ -143,6 +144,10 @@ const UNLOCK_ERROR_COOLDOWN_MS = 30_000
  * fix measured long ago would keep being sent as the user's current position. At the ~1 Hz
  * `watchPosition` rate this never touches a normal walk: a fix is milliseconds old when either
  * entry point offers it, and 30 s is two orders of magnitude of slack on that.
+ *
+ * The sheet is bound by the same number for the same reason one layer up: a view that refuses to
+ * ACT on a fix must not describe it either, or it sends the user walking towards a POI from a
+ * position this client would not put in a request.
  *
  * This is APPLICATION HONESTY, not a security control. The server is never told when the position
  * was measured, so a hand-written `curl` asserting a position still passes the 50 m gate on the
@@ -163,15 +168,38 @@ const mapEl = useTemplateRef<HTMLDivElement>('mapEl')
 const selectedPoi = ref<NearbyItem | null>(null)
 
 /**
+ * The fix the sheet may speak from: the one {@link offerUnlock} would act on, or nothing.
+ *
+ * `fix` on its own is not that. It deliberately survives geolocation errors and `stop()` (see
+ * useGeolocation), so one measurement keeps it readable for the rest of the session, while
+ * {@link MAX_FIX_AGE_MS} stops that same measurement from being sent. Reading `fix` straight into
+ * the sheet therefore produced the one state the message contract is written to exclude: "podejdź
+ * na 50 m" plus a distance to prove it, computed from a position this client refuses to claim.
+ * MEASURED on a desktop whose geolocation answered once with a network position ~5400 km away and
+ * then stopped answering at all — the sheet went on reporting that distance indefinitely.
+ *
+ * `selectedPoi` is a dependency so the age is re-read when the sheet OPENS, which is when it
+ * speaks; a computed over `fix` alone would cache its verdict and never consult the clock again.
+ * Accepted limit: a sheet left open does not expire by itself. Bounding that needs a ticking clock
+ * in the view, and nothing acts on what the sheet shows — the gate re-reads the age on its own.
+ */
+const sheetFix = computed(() => {
+  if (selectedPoi.value === null) return null
+  const current = fix.value
+  if (current === null || Date.now() - current.timestamp > MAX_FIX_AGE_MS) return null
+  return current
+})
+
+/**
  * How far the user is from the selected POI, measured from THEIR fix — not `item.distanceMeters`,
  * which the server measures from the centre of the nearby query (the map centre, which the camera
  * only keeps on the user while real fixes keep arriving). Same measurement the unlock gate uses,
- * so the sheet's number and its "come within 50 m" line can never contradict each other. No fix,
- * no number.
+ * and now under the same age bound, so the sheet's number and its "come within 50 m" line can
+ * never contradict each other or the gate. No usable fix, no number.
  */
 const selectedDistanceMeters = computed(() => {
   const poi = selectedPoi.value
-  const current = fix.value
+  const current = sheetFix.value
   if (poi === null || current === null) return null
   return haversineMeters({ lat: current.latitude, lon: current.longitude }, { lat: poi.lat, lon: poi.lon })
 })

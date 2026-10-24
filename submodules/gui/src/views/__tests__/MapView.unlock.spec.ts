@@ -132,7 +132,9 @@ Object.defineProperty(navigator, 'geolocation', {
 })
 
 import MapView from '@/views/MapView.vue'
+import PoiDetailSheet from '@/components/PoiDetailSheet.vue'
 import { MAX_UNLOCK_BATCH } from '@/lib/unlockApi'
+import { UNLOCK_RADIUS_METERS } from '@/lib/geo'
 
 /**
  * The clock the view reads. Both time-dependent rules on the unlock path — how old a fix may be
@@ -703,6 +705,101 @@ describe('MapView POI selection', () => {
     expect(selection(wrapper)).toBeNull()
 
     categories.toggle('museums')
+    wrapper.unmount()
+  })
+})
+
+/**
+ * The seam between the gate and what the sheet SAYS. M3-09 put the sheet's inputs in the template
+ * and nothing covered them from here, which is how `fix` reached the sheet while `offerUnlock` was
+ * already refusing that same fix for being too old. The three specs below are about one rule: the
+ * sheet speaks only from a fix the gate would act on.
+ */
+describe('MapView detail sheet inputs', () => {
+  /**
+   * Deliberately far past MAX_FIX_AGE_MS instead of a step over it: this file cannot import that
+   * constant (it is local to the view, and M3-09 removed `defineExpose`), so pinning the number
+   * here would only mirror it badly. What these specs pin is the RULE — a fix this old is not the
+   * user's position — which survives a change to the bound itself.
+   */
+  const LONG_STALE_MS = 10 * 60_000
+
+  async function mountWithPois() {
+    const wrapper = mountMap()
+    await flushPromises()
+    styleLoadListener?.()
+    return wrapper
+  }
+
+  function tapNear(): void {
+    queryRenderedFeatures.mockReturnValue([feature(NEAR.id, [100, 200], false)])
+    clickListener?.({ point: { x: 100, y: 200 } })
+  }
+
+  function sheetProps(wrapper: ReturnType<typeof mountMap>) {
+    return wrapper.findComponent(PoiDetailSheet).props() as unknown as {
+      accuracyMeters: number | null
+      distanceFromFixMeters: number | null
+    }
+  }
+
+  it('hands the sheet the accuracy and a distance measured from a fresh fix', async () => {
+    const wrapper = await mountWithPois()
+    await emitFix(AT_POI.lat, AT_POI.lon, 12)
+
+    tapNear()
+    await flushPromises()
+
+    const props = sheetProps(wrapper)
+    expect(props.accuracyMeters).toBe(12)
+    // NEAR sits ~7 m from the fix; the exact number is haversine's, the point is that it is the
+    // user's own distance and not NEAR.distanceMeters (7, the server's, from the query centre).
+    expect(props.distanceFromFixMeters).toBeGreaterThan(0)
+    expect(props.distanceFromFixMeters).toBeLessThan(UNLOCK_RADIUS_METERS)
+
+    wrapper.unmount()
+  })
+
+  it('tells the sheet it has no measurement once the fix is too old to act on', async () => {
+    const wrapper = await mountWithPois()
+    await emitFix(AT_POI.lat, AT_POI.lon, 12)
+    advanceClock(LONG_STALE_MS)
+
+    tapNear()
+    await flushPromises()
+
+    // Both halves, together: a null accuracy is what makes the sheet say "Czekam na pomiar
+    // pozycji", and a null distance is what stops it printing a number that contradicts that.
+    const props = sheetProps(wrapper)
+    expect(props.accuracyMeters).toBeNull()
+    expect(props.distanceFromFixMeters).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  it('re-reads the fix age every time the sheet opens, not once', async () => {
+    const wrapper = await mountWithPois()
+    await emitFix(AT_POI.lat, AT_POI.lon, 12)
+
+    tapNear()
+    await flushPromises()
+    expect(sheetProps(wrapper).accuracyMeters).toBe(12)
+
+    // Close, let the fix go stale with no new one arriving (geolocation that answers once and then
+    // stops, or a paused watch under KeepAlive), reopen. A verdict cached from the first open would
+    // survive here, and the sheet would keep quoting a position the gate has already disowned.
+    queryRenderedFeatures.mockReturnValue([])
+    clickListener?.({ point: { x: 400, y: 400 } })
+    await flushPromises()
+    expect(selection(wrapper)).toBeNull()
+
+    advanceClock(LONG_STALE_MS)
+    tapNear()
+    await flushPromises()
+
+    expect(sheetProps(wrapper).accuracyMeters).toBeNull()
+    expect(sheetProps(wrapper).distanceFromFixMeters).toBeNull()
+
     wrapper.unmount()
   })
 })
