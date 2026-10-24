@@ -8,12 +8,16 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+import com.laa66.spatial.domain.port.in.CheckLocationUnlocked;
+import com.laa66.spatial.domain.port.in.FindLocationDetail;
 import com.laa66.spatial.domain.port.in.FindNearbyLocations;
 import com.laa66.spatial.domain.port.in.FindNearbyLocationsForUser;
 import com.laa66.spatial.domain.port.in.UnlockLocations;
 import com.laa66.spatial.domain.port.out.LocationRepository;
 import com.laa66.spatial.domain.port.out.UnlockRepository;
 import com.laa66.spatial.domain.port.out.UserPreferences;
+import com.laa66.spatial.domain.service.LocationDetailService;
+import com.laa66.spatial.domain.service.LocationUnlockStateService;
 import com.laa66.spatial.domain.service.NearbyLocationsForUserService;
 import com.laa66.spatial.domain.service.NearbyLocationsService;
 import com.laa66.spatial.domain.service.UnlockLocationsService;
@@ -58,6 +62,28 @@ public class SpatialConfig {
 	FindNearbyLocationsForUser findNearbyLocationsForUser(
 			FindNearbyLocations findNearbyLocations, UnlockRepository unlockRepository) {
 		return new NearbyLocationsForUserService(findNearbyLocations, unlockRepository);
+	}
+
+	/**
+	 * The by-id detail read (M4-01). Takes {@link LocationRepository} directly and not the
+	 * {@link FindNearbyLocations} bean: it is a different projection of the same table, so M6's cache
+	 * decorator — which wraps that bean and is keyed on position, radius and categories — has nothing
+	 * to say about it. A detail cache, if it ever exists, is keyed on {@code osmId} and belongs here.
+	 */
+	@Bean
+	FindLocationDetail findLocationDetail(LocationRepository locationRepository) {
+		return new LocationDetailService(locationRepository);
+	}
+
+	/**
+	 * The single-POI unlock read (M4-01), the query content drives before serving or generating a
+	 * guide. Composed of {@link UnlockRepository} alone — no {@link UserPreferences} — because reading
+	 * unlock state consults no policy: the proximity preference is an input to granting, not to
+	 * reporting what was granted.
+	 */
+	@Bean
+	CheckLocationUnlocked checkLocationUnlocked(UnlockRepository unlockRepository) {
+		return new LocationUnlockStateService(unlockRepository);
 	}
 
 	/**

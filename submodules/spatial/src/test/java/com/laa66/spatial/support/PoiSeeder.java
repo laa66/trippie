@@ -52,6 +52,35 @@ public final class PoiSeeder {
 				.update();
 	}
 
+	/**
+	 * The same placement, plus the two columns only the by-id detail read projects:
+	 * {@code description} and the raw {@code tags} document.
+	 *
+	 * <p>{@code tagsJson} is bound as text and cast, so a test can seed whatever OSM's mappers can
+	 * write — a nested object, an array, a JSON null — and the assertions are then about what the
+	 * query does with real JSONB rather than about what a Java-side flattener would have done.
+	 * Separate from {@link #seedPoiAtDistance} rather than an extra parameter on it: that method is
+	 * what every unlock-radius test's distance table rests on, and
+	 * {@code PoiUnlockIntegrationTest#seedPlacesPoisAtTheIntendedGeodesicDistances} pins exactly it.
+	 */
+	public void seedPoiWithDetail(String osmId, double meters, String name, String description, String tagsJson) {
+		jdbc.sql("""
+				INSERT INTO location_point (osm_id, name, description, category, geom, tags)
+				VALUES (:id, :name, :description, :cat,
+				        ST_Project(ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography, :meters, radians(0)),
+				        CAST(:tags AS jsonb))
+				""")
+				.param("id", osmId)
+				.param("name", name)
+				.param("description", description)
+				.param("cat", Category.HERITAGE.slug())
+				.param("lon", observerLon)
+				.param("lat", observerLat)
+				.param("meters", meters)
+				.param("tags", tagsJson)
+				.update();
+	}
+
 	/** What the geometry engine itself says the seeded POI's distance from the observer is. */
 	public double distanceFromObserver(String osmId) {
 		return jdbc.sql("""

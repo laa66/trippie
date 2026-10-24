@@ -18,6 +18,29 @@ import com.laa66.spatial.domain.model.InsufficientAccuracyException;
 @RestControllerAdvice
 class SpatialRequestExceptionHandler extends ResponseEntityExceptionHandler {
 
+	/**
+	 * 404 whose {@code detail} is a constant: the requested id is reflected nowhere a client has to
+	 * parse, and adding it would say nothing the caller does not already know.
+	 *
+	 * <p><strong>The response body is not id-free, and the difference is worth stating exactly,
+	 * because the first version of this javadoc claimed otherwise.</strong> Measured: Spring fills a
+	 * {@link ProblemDetail}'s {@code instance} with the request URI when it is left null, so
+	 * {@code GET /locations/node/999} answers {@code "instance": "/locations/node/999"} — an arbitrary
+	 * path segment, of arbitrary length, echoed back. That is deliberate and kept: it is RFC 9457's
+	 * own field for "which request failed", every other problem response from this advice carries it
+	 * (a malformed {@code lat} echoes its URI the same way), and it is inert — the media type is
+	 * {@code application/problem+json} and the value is JSON-escaped, so it is a diagnostic and not a
+	 * rendering surface. Overriding it here alone would make the 404 the one response in the module
+	 * without it, to hide an id the client just sent.
+	 *
+	 * <p>{@code LocationDetailControllerTest} pins both halves — the constant detail and the echoed
+	 * instance — so neither can change silently.
+	 */
+	@ExceptionHandler(LocationNotFoundException.class)
+	ProblemDetail handleLocationNotFound(LocationNotFoundException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "No POI with that id");
+	}
+
 	@ExceptionHandler(InvalidRequestException.class)
 	ProblemDetail handleInvalidRequest(InvalidRequestException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
