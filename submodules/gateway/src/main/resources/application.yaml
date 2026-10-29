@@ -22,6 +22,19 @@ spring:
                 - Path=/api/spatial/**
               filters:
                 - StripPrefix=2
+            # Content controllers map plain paths (/content, ...), same StripPrefix=2 convention.
+            # The authorization matrix (SecurityConfig) covers /api/content/** through
+            # anyExchange().authenticated(), EXCEPT /api/content/internal/**, which is denied
+            # outright (case-insensitively — SecurityConfig.CONTENT_INTERNAL, not a PathPattern):
+            # content's worker-facing surface is service-to-service inside the compose network and
+            # a user's token must not reach it. This route would otherwise forward it as
+            # /internal/** with a trusted X-User-Id.
+            - id: content
+              uri: ${CONTENT_URI:http://content:8080}
+              predicates:
+                - Path=/api/content/**
+              filters:
+                - StripPrefix=2
             # Auth controllers map plain paths (/register, /login, /settings, ...); StripPrefix=2
             # drops the gateway-only "api" + "auth" prefix. The route authorization matrix
             # (SecurityConfig) protects these paths pre-StripPrefix. Compose wiring of AUTH_URI is

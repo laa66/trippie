@@ -1,6 +1,12 @@
 # Build context for the JVM services is `submodules/`. Keep only sources; drop
-# generated artifacts, gradle caches and the node-heavy / empty modules so the
-# context transfer stays small.
+# generated artifacts, gradle caches and the modules that are never built from
+# here, so the context transfer stays small. A module listed below cannot be
+# built from THIS context at all (`COPY <module>` fails with "not found"), so
+# the rule is: no module that compose builds from this context may appear here.
+# A module with its OWN build context stays listed and still builds — gui and
+# spatial-loader are built from ../submodules/gui and ../submodules/spatial-loader.
+# content left the list in M4-02 because its Dockerfile builds from here; worker
+# stays until M4-09 gives it one.
 **/build
 **/.gradle
 **/node_modules
@@ -8,6 +14,5 @@
 **/dist-ssr
 **/.git
 gui
-content
 worker
 spatial-loader

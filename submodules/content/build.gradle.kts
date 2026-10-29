@@ -1,0 +1,97 @@
+plugins {
+	java
+	id("org.springframework.boot") version "4.0.5"
+	id("io.spring.dependency-management") version "1.1.7"
+}
+
+group = "com.laa66"
+version = "0.0.1-SNAPSHOT"
+
+repositories {
+	mavenCentral()
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+dependencies {
+	implementation("com.laa66:commons")
+	implementation("org.springframework.boot:spring-boot-starter-web")
+	implementation("org.springframework.boot:spring-boot-starter-actuator")
+
+	// JdbcClient + native SQL (spring-boot-starter-jdbc) and startup Flyway.
+	// Boot 4 moved FlywayAutoConfiguration into the dedicated spring-boot-flyway module, so
+	// flyway-core alone does NOT migrate on startup — both are required for content to own and
+	// apply the poi_content schema when it boots against Postgres.
+	implementation("org.springframework.boot:spring-boot-starter-jdbc")
+	implementation("org.springframework.boot:spring-boot-flyway")
+	runtimeOnly("org.flywaydb:flyway-database-postgresql")
+	runtimeOnly("org.postgresql:postgresql")
+
+	// Annotation-only, for infrastructure/web/package-info.java (that file says why it exists).
+	// NOT a fix for a broken build: measured, removing this line still compiles, because
+	// spring-core-7.0.6.pom lists org.jspecify:jspecify:1.0.0 in compile scope. It is declared so
+	// the annotation we actually write against is OURS rather than inherited by accident, and so a
+	// relocation on Spring's side shows up as a dependency change instead of a compile error.
+	//
+	// compileOnly is the right scope for OUR code -- the annotation is needed at compile time only.
+	// Do NOT read it as "jspecify is unused at runtime" and do NOT exclude org.jspecify from
+	// runtimeClasspath: spring-core needs it there. Measured: with it excluded,
+	// ContentApplicationTests and HealthEndpointTest fail at context startup.
+	compileOnly("org.jspecify:jspecify:1.0.0")
+
+	testImplementation("org.springframework.boot:spring-boot-starter-test")
+	// Boot 4 split @WebMvcTest slice support out of spring-boot-starter-test into its own starter.
+	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+	// spring-boot-flyway pulls flyway-core in transitively; declared so tests can use the Flyway
+	// API directly at test-compile.
+	testImplementation("org.flywaydb:flyway-core")
+	testImplementation("org.testcontainers:testcontainers-postgresql")
+	// Hexagon direction + "the HTTP layer may not reach an outbound port", pinned as a test
+	// (ArchitectureTest). Version is explicit because ArchUnit is not in
+	// the Spring Boot BOM, so dependency-management has nothing to say about it and an omitted
+	// version would simply fail to resolve. Plain `archunit`, not `archunit-junit5`: the rules are
+	// driven from ordinary @Test methods, which keeps the import visible to assertions instead of
+	// hidden behind a second JUnit engine.
+	testImplementation("com.tngtech.archunit:archunit:1.5.1")
+	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<Test> {
+	useJUnitPlatform()
+	// Activates the `test` profile (application-test.yaml) without touching any test class:
+	// startup Flyway off + DB health off so the context/health tests run without a database.
+	environment("SPRING_PROFILES_ACTIVE", "test")
+}
+
+// Split by class name: ITs (*IntegrationTest / *IntTest) vs everything else; used by `make unit-test` / `make int-test`.
+val integrationTestPatterns = listOf("**/*IntegrationTest.class", "**/*IntTest.class")
+
+tasks.register<Test>("unitTest") {
+	testClassesDirs = sourceSets["test"].output.classesDirs
+	classpath = sourceSets["test"].runtimeClasspath
+	exclude(integrationTestPatterns)
+}
+
+tasks.register<Test>("integrationTest") {
+	testClassesDirs = sourceSets["test"].output.classesDirs
+	classpath = sourceSets["test"].runtimeClasspath
+	include(integrationTestPatterns)
+	// Docker daemon state is not a tracked input; never report ITs as UP-TO-DATE.
+	outputs.upToDateWhen { false }
+}
+
+// Gradle silently skips a Test task whose filter matches no class (BUILD SUCCESSFUL, zero tests).
+listOf("unitTest", "integrationTest").forEach { name ->
+	val resultsDir = layout.buildDirectory.dir("test-results/$name")
+	val guard = tasks.register("${name}Guard") {
+		doLast {
+			val xmls = resultsDir.get().asFile.listFiles { f -> f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
+			if (xmls.isNullOrEmpty()) throw GradleException("$name produced no test results: its filter matched no test class")
+		}
+	}
+	tasks.named(name) { finalizedBy(guard) }
+}

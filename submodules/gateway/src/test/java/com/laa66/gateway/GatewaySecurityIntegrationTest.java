@@ -1,12 +1,19 @@
 package com.laa66.gateway;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
@@ -37,12 +44,19 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 /**
- * Security IT for the reactive resource-server gateway (M2-11, flow 03). Two in-JVM stubs stand in
- * for the compose-only services: a backend (auth + spatial share it here) that echoes the forwarded
- * path and the {@code X-User-Id} it received, and a JWKS endpoint serving a locally-generated EC
- * P-256 public key. Tokens are minted locally with the matching private key, mirroring auth's
- * {@code NimbusAccessTokenMinter} (ES256, {@code typ=JWT}, header {@code kid}; claims
- * {@code sub/iss/iat/exp/jti}).
+ * Security IT for the reactive resource-server gateway (M2-11, flow 03). Four in-JVM stubs stand in
+ * for the compose-only services: ONE BACKEND PER ROUTE TARGET ({@code SPATIAL_URI},
+ * {@code CONTENT_URI}, {@code AUTH_URI}), each echoing the forwarded path, the {@code X-User-Id} it
+ * received and a {@code backend} marker naming itself, plus a JWKS endpoint serving a
+ * locally-generated EC P-256 public key. Tokens are minted locally with the matching private key,
+ * mirroring auth's {@code NimbusAccessTokenMinter} (ES256, {@code typ=JWT}, header {@code kid};
+ * claims {@code sub/iss/iat/exp/jti}).
+ *
+ * <p>Why one stub per target rather than one shared stub: a shared echo pins a route's EXISTENCE
+ * and its {@code StripPrefix=2}, but not its TARGET. Measured on this suite — pointing the
+ * {@code content} route at {@code ${SPATIAL_URI}} left all 22 tests green, while in production the
+ * same typo sends every {@code /api/content/**} request to spatial and 404s it. The {@code backend}
+ * marker is what makes those mutants fail, and all three route targets now carry one.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class GatewaySecurityIntegrationTest {
@@ -50,7 +64,9 @@ class GatewaySecurityIntegrationTest {
 	private static final String ISSUER = "https://auth.trippie.local";
 	private static final String KID = "test-kid";
 
-	private static HttpServer backendStub;
+	private static HttpServer spatialStub;
+	private static HttpServer contentStub;
+	private static HttpServer authStub;
 	private static HttpServer jwksStub;
 	private static ECKey signingKey;
 
@@ -71,20 +87,16 @@ class GatewaySecurityIntegrationTest {
 				exchange -> respond(exchange, 200, publicJwks.toString()));
 		jwksStub.start();
 
-		// Backend echoes the forwarded path + received X-User-Id so assertions read the response,
-		// avoiding shared-state races across requests.
-		backendStub = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-		backendStub.createContext("/", exchange -> {
-			String path = exchange.getRequestURI().getPath();
-			String userId = exchange.getRequestHeaders().getFirst("X-User-Id");
-			respond(exchange, 200, "{\"path\":\"" + path + "\",\"userId\":\""
-					+ (userId == null ? "" : userId) + "\"}");
-		});
-		backendStub.start();
+		// One backend per route target. Each echoes the forwarded path + received X-User-Id (so
+		// assertions read the response instead of shared state) and names itself, which is what
+		// turns a route pointed at the wrong URI into a failure rather than a green test.
+		spatialStub = echoStub("spatial");
+		contentStub = echoStub("content");
+		authStub = echoStub("auth");
 
-		String backendUri = "http://127.0.0.1:" + backendStub.getAddress().getPort();
-		registry.add("SPATIAL_URI", () -> backendUri);
-		registry.add("AUTH_URI", () -> backendUri);
+		registry.add("SPATIAL_URI", () -> uriOf(spatialStub));
+		registry.add("CONTENT_URI", () -> uriOf(contentStub));
+		registry.add("AUTH_URI", () -> uriOf(authStub));
 		registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri",
 				() -> "http://127.0.0.1:" + jwksStub.getAddress().getPort() + "/.well-known/jwks.json");
 		// The decoder now runs a denylist EXISTS on every decoded token; point it at a live (empty)
@@ -96,11 +108,10 @@ class GatewaySecurityIntegrationTest {
 
 	@AfterAll
 	static void stopStubs() {
-		if (backendStub != null) {
-			backendStub.stop(0);
-		}
-		if (jwksStub != null) {
-			jwksStub.stop(0);
+		for (HttpServer stub : new HttpServer[] { spatialStub, contentStub, authStub, jwksStub }) {
+			if (stub != null) {
+				stub.stop(0);
+			}
 		}
 	}
 
@@ -111,9 +122,12 @@ class GatewaySecurityIntegrationTest {
 
 	// ---- open routes -------------------------------------------------------
 
+	/** Also pins the target of the separate {@code spatial-health} route, not just that it is open. */
 	@Test
 	void health_passesThroughTokenless() {
-		client.get().uri("/health").exchange().expectStatus().isOk();
+		client.get().uri("/health").exchange()
+				.expectStatus().isOk()
+				.expectBody().jsonPath("$.backend").isEqualTo("spatial");
 	}
 
 	@Test
@@ -129,14 +143,18 @@ class GatewaySecurityIntegrationTest {
 	void publicLogin_tokenless_reachesBackendStripped() {
 		client.post().uri("/api/auth/login").exchange()
 				.expectStatus().isOk()
-				.expectBody().jsonPath("$.path").isEqualTo("/login");
+				.expectBody()
+				.jsonPath("$.backend").isEqualTo("auth")
+				.jsonPath("$.path").isEqualTo("/login");
 	}
 
 	@Test
 	void publicRegister_tokenless_reachesBackend() {
 		client.post().uri("/api/auth/register").exchange()
 				.expectStatus().isOk()
-				.expectBody().jsonPath("$.path").isEqualTo("/register");
+				.expectBody()
+				.jsonPath("$.backend").isEqualTo("auth")
+				.jsonPath("$.path").isEqualTo("/register");
 	}
 
 	/**
@@ -154,7 +172,9 @@ class GatewaySecurityIntegrationTest {
 	void publicAuthLogout_tokenless_reachesBackend() {
 		client.post().uri("/api/auth/logout").exchange()
 				.expectStatus().isOk()
-				.expectBody().jsonPath("$.path").isEqualTo("/logout");
+				.expectBody()
+				.jsonPath("$.backend").isEqualTo("auth")
+				.jsonPath("$.path").isEqualTo("/logout");
 	}
 
 	// ---- protected routes reject bad/absent tokens -------------------------
@@ -162,6 +182,18 @@ class GatewaySecurityIntegrationTest {
 	@Test
 	void protectedSpatial_noToken_isUnauthorized() {
 		client.get().uri("/api/spatial/locations/nearby").exchange()
+				.expectStatus().isUnauthorized();
+	}
+
+	/**
+	 * Pins the authorization MATRIX, not the route: measured, this stays green with the
+	 * {@code content} route deleted from {@code application.yaml}, because an unrouted path under
+	 * {@code anyExchange().authenticated()} also answers 401. The route itself is pinned by
+	 * {@link #validToken_toContent_isStrippedAndCarriesSubjectAsUserId()}.
+	 */
+	@Test
+	void protectedContent_noToken_isUnauthorized() {
+		client.get().uri("/api/content/content").exchange()
 				.expectStatus().isUnauthorized();
 	}
 
@@ -277,7 +309,9 @@ class GatewaySecurityIntegrationTest {
 				.header("Authorization", "Bearer " + token)
 				.exchange()
 				.expectStatus().isOk()
-				.expectBody().jsonPath("$.path").isEqualTo("/locations/nearby");
+				.expectBody()
+				.jsonPath("$.backend").isEqualTo("spatial")
+				.jsonPath("$.path").isEqualTo("/locations/nearby");
 	}
 
 	@Test
@@ -307,6 +341,24 @@ class GatewaySecurityIntegrationTest {
 	}
 
 	@Test
+	void validToken_toContent_isStrippedAndCarriesSubjectAsUserId() throws Exception {
+		String sub = UUID.randomUUID().toString();
+		String token = mint(signingKey, sub, ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		client.get().uri("/api/content/content")
+				.header("Authorization", "Bearer " + token)
+				.header("X-User-Id", "attacker")
+				.exchange()
+				.expectStatus().isOk()
+				.expectBody()
+				// `backend` pins the route TARGET; $.path pins StripPrefix=2; $.userId pins the
+				// trust boundary. Without the first, CONTENT_URI -> SPATIAL_URI stays green.
+				.jsonPath("$.backend").isEqualTo("content")
+				.jsonPath("$.path").isEqualTo("/content")
+				.jsonPath("$.userId").isEqualTo(sub);
+	}
+
+	@Test
 	void publicRoute_stripsSpoofedUserId() {
 		client.post().uri("/api/auth/login")
 				.header("X-User-Id", "attacker")
@@ -332,6 +384,167 @@ class GatewaySecurityIntegrationTest {
 				.expectBody().jsonPath("$.userId").isEqualTo("");
 	}
 
+	// ---- /api/content/internal/** is not routable --------------------------
+
+	@Test
+	void internalContentPath_withValidToken_isForbidden() throws Exception {
+		String token = mint(signingKey, UUID.randomUUID().toString(), ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		client.post().uri("/api/content/internal/results")
+				.header("Authorization", "Bearer " + token)
+				.exchange().expectStatus().isForbidden();
+	}
+
+	@Test
+	void internalContentPath_noToken_isUnauthorized() {
+		client.post().uri("/api/content/internal/results").exchange().expectStatus().isUnauthorized();
+	}
+
+	/**
+	 * What the {@code denyAll} rule really holds, MEASURED here, not reasoned about. Every shape is
+	 * sent with the raw path on the wire (JDK {@code HttpClient} over {@code URI.create}, which
+	 * neither normalises nor re-encodes), with a valid token and without one:
+	 *
+	 * <table><caption>bypass shapes</caption>
+	 * <tr><th>shape</th><th>with token</th><th>tokenless</th></tr>
+	 * <tr><td>{@code /api/content/internal/results}</td><td>403</td><td>401</td></tr>
+	 * <tr><td>{@code /api/content/internal} (no trailing segment)</td><td>403</td><td>401</td></tr>
+	 * <tr><td>{@code /api/content/Internal/results}, {@code INTERNAL},
+	 *     {@code /API/CONTENT/INTERNAL}</td><td>403</td><td>401</td></tr>
+	 * <tr><td>{@code /api/content/%69nternal/results}, {@code intern%61l},
+	 *     {@code %69%6e%74%65%72%6e%61%6c}, bare {@code %69nternal},
+	 *     {@code /%61pi/content/%69nternal/results}</td><td>403</td><td>401</td></tr>
+	 * <tr><td>{@code /api/content//internal/results}</td><td>400</td><td>400</td></tr>
+	 * <tr><td>{@code /api/content/%2e%2e/internal/results}</td><td>400</td><td>400</td></tr>
+	 * <tr><td>{@code /api/content/x/../internal/results}</td><td>400</td><td>400</td></tr>
+	 * <tr><td>{@code /api/content/internal%2Fresults}</td><td>400</td><td>400</td></tr>
+	 * <tr><td>{@code /api/content/x/%2F../internal/results}</td><td>400</td><td>400</td></tr>
+	 * <tr><td>{@code /api/content/internal./results}</td><td><b>200</b></td><td>401</td></tr>
+	 * </table>
+	 *
+	 * <p>The 400s are identical with and without a token and appear on other routes too
+	 * ({@code /api/auth//login} is 400 as well), so they come from WebFlux URL parsing BEFORE the
+	 * authorization matcher runs, not from this rule: an empty path segment, an encoded dot-segment,
+	 * a literal {@code ..} segment and an encoded slash never reach routing at all. That is why the
+	 * mismatch Light warned about — Security matching a parsed path while {@code StripPrefix} takes
+	 * raw segments — cannot be exploited through those shapes on this stack.
+	 *
+	 * <p>Residual, measured, and deliberately in this table rather than left out:
+	 * {@code /api/content/internal./results} answers 200 and is forwarded as {@code /internal./…}.
+	 * {@code internal.} is a DIFFERENT path segment, so no pattern for {@code internal} should match
+	 * it, and it is not a way into the backend's {@code /internal/**} either: Spring 6 removed
+	 * suffix pattern matching, so {@code @PostMapping("/internal/results")} does not answer
+	 * {@code /internal./results}. It is listed because "the gateway denies everything that looks
+	 * like internal" would be a false summary of this rule.
+	 *
+	 * <p>The encoded row is the hole that survived round 2 of the M4-02 review: a matcher folding
+	 * {@code getRequest().getPath().value()} to lower case reads the RAW path, so {@code %69nternal}
+	 * sailed past it and was forwarded (measured 200 with a trusted {@code X-User-Id}). Unlike the
+	 * case variants, Spring MVC would NOT have stopped it downstream — Tomcat decodes before
+	 * mapping. See {@code SecurityConfig.CONTENT_INTERNAL}.
+	 */
+	@Test
+	void internalBypassShapes_areRejectedByUrlParsingBeforeAuthorization() throws Exception {
+		String token = mint(signingKey, UUID.randomUUID().toString(), ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		for (String raw : List.of(
+				"/api/content//internal/results",
+				"/api/content/%2e%2e/internal/results",
+				"/api/content/x/../internal/results",
+				"/api/content/internal%2Fresults",
+				"/api/content/x/%2F../internal/results")) {
+			assertThat(rawProbe(raw, token)).as("with token: %s", raw).startsWith("400 ");
+			assertThat(rawProbe(raw, null)).as("tokenless: %s", raw).startsWith("400 ");
+		}
+		// Route-independent, i.e. it is URL parsing and not our rule doing the rejecting.
+		assertThat(rawProbe("/api/auth//login", null)).startsWith("400 ");
+	}
+
+	/** {@code /**}-equivalent: the bare prefix is denied as well, not only paths under it. */
+	@Test
+	void internalPrefixWithoutTrailingSegment_isDenied() throws Exception {
+		String token = mint(signingKey, UUID.randomUUID().toString(), ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		assertThat(rawProbe("/api/content/internal", token)).startsWith("403 ");
+	}
+
+	/**
+	 * The case fold the default (case-sensitive) {@code PathPattern} parser could not hold: measured
+	 * 200 + forwarded before the fix, M4-02 review round 1. Keeps the two doors separate here too: a
+	 * valid token is refused by the rule (403), an absent one by the resource-server entry point
+	 * (401).
+	 */
+	@Test
+	void caseVariantsOfInternal_areDenied() throws Exception {
+		assertDeniedBothWays(
+				"/api/content/Internal/results",
+				"/api/content/INTERNAL/results",
+				"/API/CONTENT/INTERNAL/results");
+	}
+
+	/**
+	 * The hole that survived round 2 (M4-02 review): a hand-rolled matcher folding the RAW path
+	 * could not see through percent-encoding, so {@code %69nternal} was forwarded to content with a
+	 * trusted {@code X-User-Id}. A pattern parsed by {@code PathPatternParser} matches DECODED
+	 * segments, exactly like the route predicate that decides this request is content's at all —
+	 * which is why the two can no longer disagree.
+	 *
+	 * <p>{@code /%61pi/...} is the decisive shape: it proves the decoding happens before matching on
+	 * every segment, not only the one we name.
+	 */
+	@Test
+	void percentEncodedVariantsOfInternal_areDenied() throws Exception {
+		assertDeniedBothWays(
+				"/api/content/%69nternal/results",
+				"/api/content/%49nternal/results",
+				"/api/content/%69NTERNAL/results",
+				"/api/content/intern%61l/results",
+				"/api/content/%69%6e%74%65%72%6e%61%6c/results",
+				"/api/content/%69nternal",
+				"/%61pi/content/%69nternal/results");
+	}
+
+	/**
+	 * Residual, pinned as measured so the rule is not summarised as more than it is: {@code internal.}
+	 * is a different segment and is forwarded. Not a route to the backend's {@code /internal/**}
+	 * (Spring 6 has no suffix pattern matching), and it still needs a token.
+	 */
+	@Test
+	void trailingDotSegment_isForwarded_notDenied() throws Exception {
+		String token = mint(signingKey, UUID.randomUUID().toString(), ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		assertThat(rawProbe("/api/content/internal./results", token))
+				.startsWith("200 ")
+				.contains("\"backend\":\"content\"");
+		assertThat(rawProbe("/api/content/internal./results", null)).startsWith("401 ");
+	}
+
+	private void assertDeniedBothWays(String... rawPaths) throws Exception {
+		String token = mint(signingKey, UUID.randomUUID().toString(), ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		for (String raw : rawPaths) {
+			assertThat(rawProbe(raw, token)).as("with token: %s", raw).startsWith("403 ");
+			assertThat(rawProbe(raw, null)).as("tokenless: %s", raw).startsWith("401 ");
+		}
+	}
+
+	/**
+	 * Sends the path EXACTLY as given: {@code URI.create} does not normalise dot-segments and the
+	 * JDK client does not re-encode, which {@code WebTestClient}'s URI builder would. Returns
+	 * {@code "<status> <body>"}.
+	 */
+	private String rawProbe(String rawPath, String token) throws Exception {
+		HttpRequest.Builder request = HttpRequest
+				.newBuilder(URI.create("http://localhost:" + port + rawPath))
+				.POST(HttpRequest.BodyPublishers.noBody());
+		if (token != null) {
+			request.header("Authorization", "Bearer " + token);
+		}
+		HttpResponse<String> response = HttpClient.newHttpClient()
+				.send(request.build(), HttpResponse.BodyHandlers.ofString());
+		return response.statusCode() + " " + response.body();
+	}
+
 	// ---- helpers -----------------------------------------------------------
 
 	private static String mint(ECKey key, String sub, String issuer, Instant iat, Instant exp)
@@ -350,6 +563,22 @@ class GatewaySecurityIntegrationTest {
 		SignedJWT jwt = new SignedJWT(header, claims);
 		jwt.sign(new ECDSASigner(key.toECPrivateKey()));
 		return jwt.serialize();
+	}
+
+	private static HttpServer echoStub(String backend) throws IOException {
+		HttpServer stub = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		stub.createContext("/", exchange -> {
+			String path = exchange.getRequestURI().getPath();
+			String userId = exchange.getRequestHeaders().getFirst("X-User-Id");
+			respond(exchange, 200, "{\"backend\":\"" + backend + "\",\"path\":\"" + path
+					+ "\",\"userId\":\"" + (userId == null ? "" : userId) + "\"}");
+		});
+		stub.start();
+		return stub;
+	}
+
+	private static String uriOf(HttpServer stub) {
+		return "http://127.0.0.1:" + stub.getAddress().getPort();
 	}
 
 	private static void respond(HttpExchange exchange, int status, String body) throws IOException {

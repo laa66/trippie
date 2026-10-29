@@ -1,0 +1,13 @@
+# `test` profile, active for all Gradle test tasks (SPRING_PROFILES_ACTIVE=test, set in
+# build.gradle.kts). Overlays the base application.yaml; only the two test-only relaxations live
+# here: startup Flyway off and the DB health contributor off, so context tests run without a
+# database. The Postgres integration tests re-point the datasource and re-enable Flyway via
+# @DynamicPropertySource (highest precedence).
+spring:
+  flyway:
+    enabled: false
+
+management:
+  health:
+    db:
+      enabled: false

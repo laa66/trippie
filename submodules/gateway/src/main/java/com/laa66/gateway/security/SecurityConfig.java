@@ -22,7 +22,11 @@ import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.context.NoOpServerSecurityContextRepository;
+import org.springframework.security.web.server.util.matcher.PathPatternParserServerWebExchangeMatcher;
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.util.StringUtils;
+import org.springframework.web.util.pattern.PathPattern;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * Reactive OAuth2 resource-server security for the gateway (flow 03). Access tokens are validated
@@ -69,6 +73,47 @@ class SecurityConfig {
 			"/api/auth/reset-password"
 	};
 
+	private static final String CONTENT_INTERNAL_PREFIX = "/api/content/internal";
+
+	/**
+	 * The worker-facing surface of content: {@code /api/content/internal/**}, matched
+	 * case-insensitively AND on DECODED path segments.
+	 *
+	 * <p>Two earlier versions of this rule leaked, and the second one is the lesson:
+	 * {@code pathMatchers("/api/content/internal/**")} is case-sensitive, so
+	 * {@code /api/content/Internal/results} missed it and was forwarded. Replacing it with a
+	 * hand-rolled matcher that folded {@code getRequest().getPath().value()} to lower case fixed the
+	 * case variants and opened a worse hole: that value is the RAW path, so
+	 * {@code /api/content/%69nternal/results} and even {@code /%61pi/content/%69nternal/results}
+	 * were forwarded to content with a trusted {@code X-User-Id} (measured 200). The route predicate
+	 * decodes segments before matching; a matcher reading the raw value does not.
+	 *
+	 * <p>So the fix is a {@link PathPattern} after all — the default parser simply had case
+	 * sensitivity on. A pattern parsed by {@link PathPatternParser} with
+	 * {@code setCaseSensitive(false)} matches what the route predicate matches, decoded segment by
+	 * decoded segment, which is the only comparison that can keep the promise.
+	 *
+	 * <p>And the boundary stated plainly, because getting it wrong is what produced the second
+	 * hole: Spring MVC's case-sensitive request mapping is NOT a second line of defence here. It
+	 * only disposes of case variants. Tomcat decodes {@code %69} before mapping, so an encoded
+	 * {@code internal} that slipped past the gateway would hit a future
+	 * {@code @PostMapping("/internal/results")} exactly, for any logged-in user.
+	 *
+	 * <p>Scope is deliberate: content's surface only. {@code /api/spatial/internal/...} is forwarded
+	 * (measured) because spatial has no such surface. A second service with one adds its own pattern
+	 * and an {@code OrServerWebExchangeMatcher}, rather than widening this into "any path containing
+	 * /internal/".
+	 */
+	private static final ServerWebExchangeMatcher CONTENT_INTERNAL =
+			caseInsensitive(CONTENT_INTERNAL_PREFIX + "/**");
+
+	/** {@code /**} also matches zero segments, so the bare prefix is covered by the same pattern. */
+	private static ServerWebExchangeMatcher caseInsensitive(String pattern) {
+		PathPatternParser parser = new PathPatternParser();
+		parser.setCaseSensitive(false);
+		return new PathPatternParserServerWebExchangeMatcher(parser.parse(pattern));
+	}
+
 	@Bean
 	SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http, ReactiveJwtDecoder jwtDecoder,
 			UserIdHeaderFilter userIdHeaderFilter) {
@@ -85,9 +130,17 @@ class SecurityConfig {
 						// (that would expose /api/auth/settings). The relaxation for /logout is
 						// exactly one entry.
 						.pathMatchers(HttpMethod.POST, PUBLIC_AUTH_POSTS).permitAll()
-						// Everything else (/api/auth/settings, /api/spatial/**, and any unmapped
-						// path) requires a valid JWT. Absent/invalid/expired token on a protected
-						// route -> 401 via the resource-server entry point.
+						// Service-to-service surface, never a browser surface: the worker reports
+						// generation results to content on /internal/**. A worker is not a user, so
+						// no access token can authorise it -- and anyExchange().authenticated()
+						// cannot tell the two apart: any logged-in user's valid token would reach
+						// /internal/results as a trusted X-User-Id. The rule sits HERE because the
+						// authorization matcher sees the path BEFORE StripPrefix=2 rewrites it, and
+						// /internal/** stays reachable only from inside the compose network.
+						.matchers(CONTENT_INTERNAL).denyAll()
+						// Everything else (/api/auth/settings, /api/spatial/**, /api/content/**, and
+						// any unmapped path) requires a valid JWT. Absent/invalid/expired token on a
+						// protected route -> 401 via the resource-server entry point.
 						.anyExchange().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtDecoder(jwtDecoder)))
 				// Runs after authentication so ReactiveSecurityContextHolder holds the JWT, before

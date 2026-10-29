@@ -105,6 +105,7 @@ auth-keys:
 unit-test:
 	( cd submodules/commons && ./gradlew unitTest --rerun )
 	( cd submodules/spatial && ./gradlew unitTest --rerun )
+	( cd submodules/content && ./gradlew unitTest --rerun )
 	( cd submodules/gateway && ./gradlew unitTest --rerun )
 	( cd submodules/auth && ./gradlew unitTest --rerun )
 	( cd submodules/spatial-loader && go test -short ./... )
@@ -113,6 +114,7 @@ unit-test:
 int-test:
 	( cd submodules/commons && ./gradlew integrationTest )
 	( cd submodules/spatial && ./gradlew integrationTest )
+	( cd submodules/content && ./gradlew integrationTest )
 	( cd submodules/gateway && ./gradlew integrationTest )
 	( cd submodules/auth && ./gradlew integrationTest )
 	( cd submodules/spatial-loader && go test -count=1 ./internal/loader/... )
