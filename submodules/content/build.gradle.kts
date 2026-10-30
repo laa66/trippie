@@ -31,18 +31,6 @@ dependencies {
 	runtimeOnly("org.flywaydb:flyway-database-postgresql")
 	runtimeOnly("org.postgresql:postgresql")
 
-	// Annotation-only, for infrastructure/web/package-info.java (that file says why it exists).
-	// NOT a fix for a broken build: measured, removing this line still compiles, because
-	// spring-core-7.0.6.pom lists org.jspecify:jspecify:1.0.0 in compile scope. It is declared so
-	// the annotation we actually write against is OURS rather than inherited by accident, and so a
-	// relocation on Spring's side shows up as a dependency change instead of a compile error.
-	//
-	// compileOnly is the right scope for OUR code -- the annotation is needed at compile time only.
-	// Do NOT read it as "jspecify is unused at runtime" and do NOT exclude org.jspecify from
-	// runtimeClasspath: spring-core needs it there. Measured: with it excluded,
-	// ContentApplicationTests and HealthEndpointTest fail at context startup.
-	compileOnly("org.jspecify:jspecify:1.0.0")
-
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	// Boot 4 split @WebMvcTest slice support out of spring-boot-starter-test into its own starter.
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")

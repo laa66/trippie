@@ -11,11 +11,12 @@ package com.laa66.content.domain.model;
  * that has a decision to make, by {@link LeaseOutcome#ATTEMPTS_EXHAUSTED}. Anything that needs a
  * column from this list is a new consumer and a new decision, not a getter.
  *
- * <p>{@code text} is non-null exactly when {@code status} is {@link ContentStatus#COMPLETED} and
+ * <p>{@code text} is non-null whenever {@code status} is {@link ContentStatus#COMPLETED} and
  * {@code failedClass} is non-null whenever it is {@link ContentStatus#FAILED}; both are table
- * CHECKs ({@code poi_content_state_check}), not conventions. The one loose case stays loose here
- * too: a {@code FAILED} or {@code PROCESSING} row may carry servable {@code text} from an earlier
- * success.
+ * CHECKs ({@code poi_content_state_check}), not conventions. The converse does not hold for
+ * {@code text}: a {@code FAILED} or {@code PROCESSING} row may still carry the text of an earlier
+ * success. That text is kept, not served: the read path serves text only on {@code COMPLETED}, and
+ * serving it in any other state is M5's decision.
  */
 public record PoiContent(ContentStatus status, String text, FailedClass failedClass) {
 }

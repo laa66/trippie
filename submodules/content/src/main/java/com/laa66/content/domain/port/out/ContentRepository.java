@@ -145,7 +145,7 @@ public interface ContentRepository {
 	 * over still arrives holding real, paid-for text for the same key, so a strict fence would throw
 	 * away something nobody can get back for free. The rule is therefore narrower than on the failure
 	 * path and it is the rule the statement implements: <em>a completion may add content it does not
-	 * own, but it may never replace content</em>. A late success lands on a row with nothing servable
+	 * own, but it may never replace content</em>. A late success lands on a row with no text
 	 * on it, and is refused on a row that already carries text — which is both the idempotency of a
 	 * redelivered result and, once regeneration exists, the protection of the text a live attempt is
 	 * busy replacing.
@@ -164,9 +164,11 @@ public interface ContentRepository {
 	 * Records a failed generation as a fact in the table rather than as a key with a TTL, so that
 	 * the retry budget and the client's answer come from the same place the content does.
 	 *
-	 * <p>Keeps whatever text an earlier success left: a later failure must not destroy servable
+	 * <p>Keeps whatever text an earlier success left: a later failure must not destroy paid-for
 	 * content. For the same reason it never overwrites a {@code COMPLETED} row — success wins over a
 	 * failure that arrives after it, which is the only ordering that cannot lose paid-for content.
+	 * Kept is not served: the read path serves text only on {@code COMPLETED}, and serving it on a
+	 * {@code FAILED} row is M5's decision.
 	 *
 	 * <p><strong>{@code leasedAt} is the token from {@link #leaseGeneration} and this path is fenced
 	 * strictly by it: a failure is only ever recorded against the lease that produced it.</strong>

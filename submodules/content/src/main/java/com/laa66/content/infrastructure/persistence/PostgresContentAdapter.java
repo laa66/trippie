@@ -85,7 +85,8 @@ class PostgresContentAdapter implements ContentRepository {
 	 * price of the loose state CHECK.</strong> The {@code PROCESSING} arm forbids all three, so a
 	 * lease that takes over a terminal row has to clear them in the same UPDATE; a forgotten SET is a
 	 * loud constraint violation on the lease rather than a quietly wrong answer. {@code text} is
-	 * deliberately kept: the previous success stays servable while the row is regenerated.
+	 * deliberately kept: a lease must not destroy paid-for text. Kept is not served: the read path
+	 * serves text only on {@code COMPLETED}, and serving it during regeneration is M5's decision.
 	 *
 	 * <p><strong>{@code attempts} and {@code last_attempt_at} move here</strong>, because an attempt
 	 * is counted from the lease and not from the provider call (the reasoning is in
@@ -182,7 +183,7 @@ class PostgresContentAdapter implements ContentRepository {
 	 * change". That is the idempotency, and it is now carried by the fence rather than by a separate
 	 * {@code status <> 'COMPLETED'} guard, which would have been unreachable behind it.</li>
 	 * <li>A worker whose lease expired and was taken over still holds real, paid-for text for this
-	 * key. If the row has nothing servable on it, that text is stored: refusing it would throw away
+	 * key. If the row has no text on it, that text is stored: refusing it would throw away
 	 * the one thing in this system that cannot be re-obtained for free. It also ends the current
 	 * lease, which costs the live attempt only the write-back of a result equivalent to the one now
 	 * stored.</li>
@@ -243,9 +244,11 @@ class PostgresContentAdapter implements ContentRepository {
 	 * <p>A plain UPDATE, not an upsert: a failure for a row that no longer exists belongs to no lease
 	 * and no budget, and re-creating the row would resurrect a dead attempt's state.
 	 *
-	 * <p>{@code text} is untouched, so a row that failed while regenerating keeps serving the text of
-	 * its previous success — the looseness {@code poi_content_state_check} leaves open for exactly
-	 * this. {@code attempts} is untouched too: the attempt was counted at the lease.
+	 * <p>{@code text} is untouched, so a row that failed while regenerating keeps the text of its
+	 * previous success — the looseness {@code poi_content_state_check} leaves open for exactly this.
+	 * Kept is not served: the read path serves text only on {@code COMPLETED}, and serving it on a
+	 * {@code FAILED} row is M5's decision. {@code attempts} is untouched too: the attempt was counted
+	 * at the lease.
 	 */
 	static final String FAIL_SQL = """
 			UPDATE poi_content

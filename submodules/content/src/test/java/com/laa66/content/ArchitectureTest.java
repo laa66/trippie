@@ -25,9 +25,9 @@ class ArchitectureTest {
 	/**
 	 * Both rules below are "no classes may ...", so they are only as strong as the import they run
 	 * over. {@code ..domain.port.out..} holds the content repository port and its adapter lives in
-	 * {@code ..infrastructure.persistence..} (M4-03), so the hexagon rule now has real classes on
-	 * both sides; {@code ..infrastructure.web..} is still a single {@code package-info} until M4-06.
-	 * ArchUnit's {@code failOnEmptyShould} catches an empty rule, but nothing would catch the import
+	 * {@code ..infrastructure.persistence..} (M4-03), and {@code ..infrastructure.web..} holds the
+	 * controller (M4-06), so both rules have real classes on both sides. ArchUnit's
+	 * {@code failOnEmptyShould} catches an empty rule, but nothing would catch the import
 	 * itself silently collapsing (a renamed root package, a changed {@code importPackages} argument)
 	 * or {@code DO_NOT_INCLUDE_TESTS} failing to exclude tests -- which is what would let a mocked
 	 * outbound port in a test class decide the web rule.
@@ -42,7 +42,7 @@ class ArchitectureTest {
 				"com.laa66.content.domain.port.out.ContentRepository",
 				"com.laa66.content.domain.port.out.PoiUnlocks",
 				"com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter",
-				"com.laa66.content.infrastructure.web.package-info");
+				"com.laa66.content.infrastructure.web.ContentController");
 
 		// Self-reference first: this class is a test, it is named here, and it cannot quietly stop
 		// existing while this assertion runs -- unlike a list of other class names, which goes

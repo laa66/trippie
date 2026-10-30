@@ -15,4 +15,6 @@ package com.laa66.content.domain.model;
  * server-side constant and not request input.
  */
 public record PoiContentKey(String osmId, ContentMode mode, String lang) {
+
+	public static final String SERVED_LANG = "pl";
 }
