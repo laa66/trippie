@@ -1,6 +1,7 @@
 package com.laa66.content.infrastructure.config;
 
 import java.time.Duration;
+import java.time.InstantSource;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -9,6 +10,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import com.laa66.content.domain.port.out.PoiUnlocks;
+import com.laa66.content.infrastructure.cache.CachingPoiUnlocks;
 import com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter;
 
 /**
@@ -29,15 +31,20 @@ public class ContentConfig {
 	 * classpath: {@code spring.http.client.*} is read by nobody, silently. No connect timeout: the
 	 * read timeout is armed before the connection is made, so it already bounds connect
 	 * (see {@code SpatialConfig#userPreferences}).
+	 *
+	 * <p>The HTTP adapter is wrapped inside this one bean, so both consumers of the port share the
+	 * same cache and neither of them knows it exists.
 	 */
 	@Bean
 	PoiUnlocks poiUnlocks(@Value("${trippie.spatial.uri}") String spatialUri) {
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
 		requestFactory.setReadTimeout(SPATIAL_TIMEOUT);
 
-		return new SpatialPoiUnlocksAdapter(RestClient.builder()
-				.baseUrl(spatialUri)
-				.requestFactory(requestFactory)
-				.build());
+		return new CachingPoiUnlocks(
+				new SpatialPoiUnlocksAdapter(RestClient.builder()
+						.baseUrl(spatialUri)
+						.requestFactory(requestFactory)
+						.build()),
+				InstantSource.system());
 	}
 }
