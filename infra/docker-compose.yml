@@ -168,6 +168,11 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/content_db
       SPRING_DATASOURCE_USERNAME: trippie
       SPRING_DATASOURCE_PASSWORD: trippie
+      # M4: the unlock gate reads spatial per request; StripPrefix=2 is a gateway rule, so this
+      # client calls /locations/... directly.
+      SPATIAL_URI: http://spatial:8080
+    # Deliberately NOT depends_on: spatial. The gate is resolved per request and an unreachable
+    # spatial is a 503 on content calls only, so it must not hold back content's boot.
     depends_on:
       postgres:
         condition: service_healthy

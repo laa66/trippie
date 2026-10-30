@@ -40,6 +40,8 @@ class ArchitectureTest {
 				"com.laa66.content.ContentApplication",
 				"com.laa66.content.domain.model.ContentMode",
 				"com.laa66.content.domain.port.out.ContentRepository",
+				"com.laa66.content.domain.port.out.PoiUnlocks",
+				"com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter",
 				"com.laa66.content.infrastructure.web.package-info");
 
 		// Self-reference first: this class is a test, it is named here, and it cannot quietly stop
