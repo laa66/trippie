@@ -24,11 +24,12 @@ class ArchitectureTest {
 
 	/**
 	 * Both rules below are "no classes may ...", so they are only as strong as the import they run
-	 * over. Today the module is nearly empty: {@code ..domain.port.out..} does not exist yet and
-	 * {@code ..infrastructure.web..} holds a single {@code package-info}. ArchUnit's
-	 * {@code failOnEmptyShould} catches an empty rule, but nothing would catch the import itself
-	 * silently collapsing (a renamed root package, a changed {@code importPackages} argument) or
-	 * {@code DO_NOT_INCLUDE_TESTS} failing to exclude tests -- which is what would let a mocked
+	 * over. {@code ..domain.port.out..} holds the content repository port and its adapter lives in
+	 * {@code ..infrastructure.persistence..} (M4-03), so the hexagon rule now has real classes on
+	 * both sides; {@code ..infrastructure.web..} is still a single {@code package-info} until M4-06.
+	 * ArchUnit's {@code failOnEmptyShould} catches an empty rule, but nothing would catch the import
+	 * itself silently collapsing (a renamed root package, a changed {@code importPackages} argument)
+	 * or {@code DO_NOT_INCLUDE_TESTS} failing to exclude tests -- which is what would let a mocked
 	 * outbound port in a test class decide the web rule.
 	 */
 	@Test
@@ -38,6 +39,7 @@ class ArchitectureTest {
 		assertThat(PRODUCTION_CLASSES.stream().map(JavaClass::getName)).contains(
 				"com.laa66.content.ContentApplication",
 				"com.laa66.content.domain.model.ContentMode",
+				"com.laa66.content.domain.port.out.ContentRepository",
 				"com.laa66.content.infrastructure.web.package-info");
 
 		// Self-reference first: this class is a test, it is named here, and it cannot quietly stop
