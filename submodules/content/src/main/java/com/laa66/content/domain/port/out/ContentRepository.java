@@ -150,8 +150,13 @@ public interface ContentRepository {
 	 * redelivered result and, once regeneration exists, the protection of the text a live attempt is
 	 * busy replacing.
 	 *
+	 * <p><strong>{@code promptVersion} is required.</strong> This is the only write that sets the
+	 * column and the schema leaves it nullable, so a {@code COMPLETED} row without one would be
+	 * accepted and could never say which prompt produced its text (M4-11).
+	 *
 	 * @throws InvalidGeneratedTextException if {@code text} is null, blank, or longer than
 	 *     {@link #MAX_TEXT_LENGTH}
+	 * @throws NullPointerException if {@code leasedAt} or {@code promptVersion} is null
 	 */
 	void completeGeneration(PoiContentKey key, Instant leasedAt, String text, String promptVersion);
 
@@ -185,6 +190,11 @@ public interface ContentRepository {
 	 * in a header for exactly this reason, but a detail built out of a URI would put any future
 	 * {@code ?key=} straight into the database. Pass the status, the provider's error code and a
 	 * body excerpt.
+	 *
+	 * <p>There is no {@code promptVersion} here and the column is left alone: M4-11 can fail before a
+	 * prompt exists, so a {@code FAILED} row legitimately has none, or the version of the text it kept.
+	 *
+	 * @throws NullPointerException if {@code leasedAt} is null
 	 */
 	void failGeneration(PoiContentKey key, Instant leasedAt, FailedClass failedClass, String failedDetail);
 

@@ -8,8 +8,11 @@ import java.time.OffsetDateTime;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import com.laa66.content.domain.model.ContentMode;
 import com.laa66.content.domain.model.ContentStatus;
@@ -34,6 +37,7 @@ import com.laa66.content.support.AbstractPostgresIntegrationTest;
  * paths treat it differently on purpose, and each direction has its own test.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@ExtendWith(OutputCaptureExtension.class)
 class PoiContentResultIntegrationTest extends AbstractPostgresIntegrationTest {
 
 	private static final PoiContentKey KEY = new PoiContentKey("node/42", ContentMode.TEXT, "pl");
@@ -219,6 +223,43 @@ class PoiContentResultIntegrationTest extends AbstractPostgresIntegrationTest {
 
 		assertThat(repository.find(KEY)).contains(
 				new PoiContent(ContentStatus.COMPLETED, "the regenerated guide", null));
+	}
+
+	/**
+	 * The zero that matters comes from the real statement, not from a stub: this is the shape in which
+	 * paid-for text is dropped, and the warning is the only trace it leaves. It names the row and
+	 * carries none of the text.
+	 */
+	@Test
+	void aRefusedCompletionWarnsWithTheRowAndWithoutTheText(CapturedOutput output) {
+		Instant expired = lease();
+		repository.completeGeneration(KEY, expired, "the earlier guide", "v1");
+		regenerateUnderANewLease();
+
+		repository.completeGeneration(KEY, expired, "the straggler's text", "v0");
+
+		assertThat(output.getOut())
+				.containsPattern("WARN.*completion refused for osmId=node/42 mode=TEXT lang=pl")
+				.doesNotContain("the straggler's text");
+	}
+
+	@Test
+	void anAcceptedCompletionDoesNotWarn(CapturedOutput output) {
+		repository.completeGeneration(KEY, lease(), "a guide to the town hall", "v1");
+
+		assertThat(output.getOut()).doesNotContain("completion refused");
+	}
+
+	/** On the failure path a zero is the zombie doing what zombies do, so it stays out of WARN. */
+	@Test
+	void aRefusedFailureDoesNotWarn(CapturedOutput output) {
+		Instant expired = lease();
+		expireTheLease();
+		repository.leaseGeneration(KEY);
+
+		repository.failGeneration(KEY, expired, FailedClass.TRANSIENT, "a failure six minutes late");
+
+		assertThat(output.getOut()).doesNotContainPattern("WARN.*osmId=node/42");
 	}
 
 	// --- the failed result ------------------------------------------------------------------

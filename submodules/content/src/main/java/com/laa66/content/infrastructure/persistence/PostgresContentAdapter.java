@@ -3,10 +3,13 @@ package com.laa66.content.infrastructure.persistence;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Objects;
 import java.util.Optional;
 
 import javax.sql.DataSource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -54,8 +57,9 @@ class PostgresContentAdapter implements ContentRepository {
 	 * module that notices, which is why that test establishes its interleaving through the server
 	 * rather than through thread timing.
 	 *
-	 * <p>{@code existing} is materialised by its reference count anyway; the keyword pins "count
-	 * once" against inlining, and no test observes it.
+	 * <p>{@code existing} is materialised by its four references anyway, and {@code locked} has only
+	 * one, so there the keyword rather than the count says it; on both it pins "count once" against
+	 * inlining, and no test observes it.
 	 *
 	 * <p><strong>{@code existing}</strong> names the three facts the decision is made of, each
 	 * written exactly once: the attempt budget is spent, the lease is over, the row is leasable. The
@@ -229,6 +233,13 @@ class PostgresContentAdapter implements ContentRepository {
 	 * strict one, and "success wins" falls out of it rather than needing a clause of its own — a
 	 * completion clears {@code started_at}, so every token minted before it is already dead.
 	 *
+	 * <p><strong>That rests on {@code COMPLETED => started_at IS NULL}, which
+	 * {@code poi_content_state_check} does not enforce.</strong> A writer that produces a
+	 * {@code COMPLETED} row with a live {@code started_at} reopens the path: measured with a probe, a
+	 * failure bearing that token turns finished content into {@code FAILED}. Unreachable today, because
+	 * {@link #COMPLETE_SQL} is the only writer of that status and it clears the column; every new path
+	 * to {@code COMPLETED} (regeneration in M5, the internal endpoint in M4-11) has to do the same.
+	 *
 	 * <p>A plain UPDATE, not an upsert: a failure for a row that no longer exists belongs to no lease
 	 * and no budget, and re-creating the row would resurrect a dead attempt's state.
 	 *
@@ -252,6 +263,8 @@ class PostgresContentAdapter implements ContentRepository {
 			WHERE osm_id = :osmId AND mode = :mode AND lang = :lang
 			""";
 
+	private static final Logger log = LoggerFactory.getLogger(PostgresContentAdapter.class);
+
 	private final JdbcClient jdbcClient;
 
 	PostgresContentAdapter(DataSource dataSource) {
@@ -273,6 +286,10 @@ class PostgresContentAdapter implements ContentRepository {
 
 	@Override
 	public void completeGeneration(PoiContentKey key, Instant leasedAt, String text, String promptVersion) {
+		// A caller's bug rather than a refused result: a lease that was refused carries no token.
+		Objects.requireNonNull(leasedAt, "leasedAt");
+		Objects.requireNonNull(promptVersion, "promptVersion");
+
 		// The last point before the row is written, and the only one: the column is unbounded TEXT,
 		// so Postgres will store a runaway response in full and serve it as a finished guide, and an
 		// empty one as a finished guide with nothing in it. Neither is retried by anything.
@@ -283,20 +300,34 @@ class PostgresContentAdapter implements ContentRepository {
 			throw InvalidGeneratedTextException.tooLong(text.length(), MAX_TEXT_LENGTH);
 		}
 
-		key(jdbcClient.sql(COMPLETE_SQL), key)
+		int written = key(jdbcClient.sql(COMPLETE_SQL), key)
 				.param("leasedAt", timestamp(leasedAt))
 				.param("text", text)
 				.param("promptVersion", promptVersion)
 				.update();
+
+		if (written == 0) {
+			// Either a redelivery or paid-for text being dropped, and this line is the only trace of
+			// the second. It identifies the row and nothing else: no text, no token.
+			log.warn("completion refused for osmId={} mode={} lang={}: row carries text and the lease token does not match",
+					key.osmId(), key.mode(), key.lang());
+		}
 	}
 
 	@Override
 	public void failGeneration(PoiContentKey key, Instant leasedAt, FailedClass failedClass, String failedDetail) {
-		key(jdbcClient.sql(FAIL_SQL), key)
+		Objects.requireNonNull(leasedAt, "leasedAt");
+
+		int written = key(jdbcClient.sql(FAIL_SQL), key)
 				.param("leasedAt", timestamp(leasedAt))
 				.param("failedClass", failedClass.name())
 				.param("failedDetail", truncated(failedDetail))
 				.update();
+
+		if (written == 0) {
+			log.debug("failure dropped for osmId={} mode={} lang={}: row no longer bears the lease token",
+					key.osmId(), key.mode(), key.lang());
+		}
 	}
 
 	@Override
