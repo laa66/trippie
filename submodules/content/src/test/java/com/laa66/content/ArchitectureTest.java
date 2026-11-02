@@ -41,7 +41,9 @@ class ArchitectureTest {
 				"com.laa66.content.domain.model.ContentMode",
 				"com.laa66.content.domain.port.out.ContentRepository",
 				"com.laa66.content.domain.port.out.PoiUnlocks",
+				"com.laa66.content.domain.port.out.EventPublisher",
 				"com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter",
+				"com.laa66.content.infrastructure.messaging.RabbitEventPublisher",
 				"com.laa66.content.infrastructure.web.ContentController");
 
 		// Self-reference first: this class is a test, it is named here, and it cannot quietly stop
@@ -72,6 +74,15 @@ class ArchitectureTest {
 				.that().resideInAPackage("..domain..")
 				.should().dependOnClassesThat().resideInAPackage("..infrastructure..")
 				.because("the domain owns its ports and must stay framework-free and adapter-free")
+				.check(PRODUCTION_CLASSES);
+	}
+
+	@Test
+	void theDomainDoesNotKnowTheBroker() {
+		noClasses()
+				.that().resideInAPackage("..domain..")
+				.should().dependOnClassesThat().resideInAnyPackage("org.springframework.amqp..", "com.rabbitmq..")
+				.because("the broker sits behind EventPublisher, so replacing it is a change of adapter")
 				.check(PRODUCTION_CLASSES);
 	}
 }

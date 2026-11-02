@@ -31,6 +31,10 @@ dependencies {
 	runtimeOnly("org.flywaydb:flyway-database-postgresql")
 	runtimeOnly("org.postgresql:postgresql")
 
+	// Unlike Flyway, the starter is enough: it pulls spring-boot-amqp, the module RabbitAutoConfiguration
+	// lives in since Boot 4.
+	implementation("org.springframework.boot:spring-boot-starter-amqp")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	// Boot 4 split @WebMvcTest slice support out of spring-boot-starter-test into its own starter.
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
@@ -38,6 +42,7 @@ dependencies {
 	// API directly at test-compile.
 	testImplementation("org.flywaydb:flyway-core")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
+	testImplementation("org.testcontainers:testcontainers-rabbitmq")
 	// Hexagon direction + "the HTTP layer may not reach an outbound port", pinned as a test
 	// (ArchitectureTest). Version is explicit because ArchUnit is not in
 	// the Spring Boot BOM, so dependency-management has nothing to say about it and an omitted

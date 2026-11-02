@@ -6,8 +6,8 @@ MBTILES := infra/tiles/wroclaw.mbtiles
 build:
 	$(COMPOSE) build
 
-# Bring up the default M1 backend stack (postgres, tileserver-gl, spatial,
-# gateway, gui) detached. redis/rabbitmq stay behind `--profile infra`.
+# Bring up the default backend stack (postgres, redis, rabbitmq, tileserver-gl,
+# spatial, content, auth, gateway, gui) detached.
 # Guard: the mbtiles must already exist as a FILE. If it is missing, Docker would
 # create a root-owned directory at the bind-mount path and tileserver-gl would
 # crash-loop — fail fast instead and point at `make tiles`.

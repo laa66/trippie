@@ -37,6 +37,9 @@ import com.sun.net.httpserver.HttpServer;
  *
  * <p>The stub answers by POI: {@code node/open*} is unlocked, {@code node/locked*} is not, anything
  * else is a 500.
+ *
+ * <p>No broker: the test profile points it at a closed port, so every read here also proves that
+ * {@code GET /content} does not need one.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ContentReadIntegrationTest extends AbstractPostgresIntegrationTest {

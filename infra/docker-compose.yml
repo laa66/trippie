@@ -1,12 +1,11 @@
 # trippie — full local assembly (M0 deliverable, M0-08; M1 backend, M1-08; M2 auth, M2-13).
 #
 # `docker compose -f infra/docker-compose.yml up --build` brings up the full
-# M2 backend stack: self-hosted tiles (tileserver-gl), postgres (PostGIS), redis
-# and app services (spatial, content, auth, gateway, gui). spatial, content and
-# auth wait for postgres to be healthy (auth also waits for redis) and run their
-# own Flyway migrations on startup; gateway waits for spatial and auth. rabbitmq
-# is not needed yet — it sits behind the `infra` profile and stays off by
-# default. Add it with `--profile infra`.
+# backend stack: self-hosted tiles (tileserver-gl), postgres (PostGIS), redis,
+# rabbitmq and app services (spatial, content, auth, gateway, gui). spatial,
+# content and auth wait for postgres to be healthy (auth also waits for redis,
+# content for rabbitmq) and run their own Flyway migrations on startup; gateway
+# waits for spatial and auth.
 #
 # Single browser-facing origin: only the gui (nginx) publishes a host port
 # (8080). The browser runs on the host, outside the compose network, so it talks
@@ -60,8 +59,8 @@ services:
 
   redis:
     # Unprofiled in M2 (M2-13): auth needs it (refresh store, jti denylist, OTP
-    # store) and the gateway needs it (jti denylist check), so it is now part of
-    # the default `make up` stack, not behind `--profile infra`.
+    # store) and the gateway needs it (jti denylist check), so it is part of the
+    # default `make up` stack.
     image: redis:7.4-alpine
     container_name: trippie-redis
     ports:
@@ -79,9 +78,12 @@ services:
   rabbitmq:
     # -management gives the UI (15672) + rabbitmq-diagnostics for the healthcheck.
     # Official RabbitMQ images are debian-based (no alpine variant).
+    # Part of the default `make up` stack since M4-07: content publishes generation tasks here.
     image: rabbitmq:4.0-management
     container_name: trippie-rabbitmq
-    profiles: [infra]
+    # The node's data directory is named after the hostname. Left to compose, every recreated
+    # container gets a new one and starts empty next to the volume's old data, queued tasks included.
+    hostname: rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: trippie
       RABBITMQ_DEFAULT_PASS: trippie
@@ -171,10 +173,17 @@ services:
       # M4: the unlock gate reads spatial per request; StripPrefix=2 is a gateway rule, so this
       # client calls /locations/... directly.
       SPATIAL_URI: http://spatial:8080
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: trippie
+      SPRING_RABBITMQ_PASSWORD: trippie
     # Deliberately NOT depends_on: spatial. The gate is resolved per request and an unreachable
     # spatial is a 503 on content calls only, so it must not hold back content's boot.
+    # rabbitmq is awaited so the generation topology is declared during boot.
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]

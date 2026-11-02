@@ -11,6 +11,20 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  # Credentials come from SPRING_RABBITMQ_USERNAME/PASSWORD at runtime and none are baked into the
+  # image. Unset, Boot falls back to guest/guest, which compose's broker does not have, so the boot
+  # fails on authentication. RabbitEventPublisher depends on the two publisher-* lines:
+  # publisher-returns also turns the template's mandatory flag on, without which an unroutable
+  # message is dropped by the broker and still acked. channel-rpc-timeout bounds the channel.open a
+  # publish does when the previous channel is still waiting for its confirm: the client's own wait
+  # is 10 min and cannot be interrupted, and this runs on a request thread.
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:rabbitmq}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    connection-timeout: 2s
+    channel-rpc-timeout: 2s
+    publisher-confirm-type: correlated
+    publisher-returns: true
 
 # Outbound dependency on spatial, the unlock gate in front of reading and generating content. The
 # URI is the only tunable here; the request timeout is a constant in ContentConfig, which says why.
@@ -26,3 +40,8 @@ management:
       base-path: /
       exposure:
         include: health
+  health:
+    # Reads keep working with the broker down and only publishing fails, so broker availability must
+    # not flip the container healthcheck to DOWN. The broker has its own compose healthcheck.
+    rabbit:
+      enabled: false
