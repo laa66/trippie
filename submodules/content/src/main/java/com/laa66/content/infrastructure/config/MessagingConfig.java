@@ -29,8 +29,8 @@ import com.laa66.content.infrastructure.messaging.TopologyDeclarer;
 public class MessagingConfig {
 
 	/**
-	 * How long a publish waits for the broker's verdict once the message is written, on a request
-	 * thread once M4-08 exists. A constant for the reason given on
+	 * How long a publish waits for the broker's verdict once the message is written, on the request
+	 * thread of {@code POST /content/generate}. A constant for the reason given on
 	 * {@link ContentConfig#SPATIAL_TIMEOUT}. The steps before that wait are bounded separately:
 	 * {@code connection-timeout} and {@code channel-rpc-timeout} in application.yaml.
 	 */
@@ -68,7 +68,7 @@ public class MessagingConfig {
 	}
 
 	@Bean
-	EventPublisher eventPublisher(RabbitOperations rabbitOperations) {
-		return new RabbitEventPublisher(rabbitOperations, CONFIRM_TIMEOUT);
+	EventPublisher eventPublisher(RabbitOperations rabbitOperations, ConnectionFactory connectionFactory) {
+		return new RabbitEventPublisher(rabbitOperations, connectionFactory, CONFIRM_TIMEOUT);
 	}
 }

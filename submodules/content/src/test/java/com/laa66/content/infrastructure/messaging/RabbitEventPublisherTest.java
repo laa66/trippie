@@ -9,6 +9,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -16,12 +17,15 @@ import java.time.Instant;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.AmqpConnectException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.ReturnedMessage;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitOperations;
 
@@ -43,7 +47,9 @@ class RabbitEventPublisherTest {
 
 	private final RabbitOperations rabbit = mock(RabbitOperations.class);
 
-	private final RabbitEventPublisher publisher = new RabbitEventPublisher(rabbit, Duration.ofMillis(50));
+	private final ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+
+	private final RabbitEventPublisher publisher = new RabbitEventPublisher(rabbit, connectionFactory, Duration.ofMillis(50));
 
 	@AfterEach
 	void clearInterruptFlag() {
@@ -107,6 +113,40 @@ class RabbitEventPublisherTest {
 		assertThatThrownBy(() -> publisher.publish(TASK))
 				.isInstanceOf(EventPublicationException.class)
 				.hasMessageContaining("queue overflow");
+	}
+
+	/** The nack reason a real broker produces, captured by {@code TopologyLostAtRuntimeIntegrationTest}. */
+	@Test
+	void aMissingExchangeResetsTheConnectionAndIsStillAnException() {
+		answerWith(new CorrelationData.Confirm(false, "channel error; protocol method: #method<channel.close>"
+				+ "(reply-code=404, reply-text=NOT_FOUND - no exchange 'trippie.content' in vhost '/', class-id=60, "
+				+ "method-id=40)"), null);
+
+		assertThatThrownBy(() -> publisher.publish(TASK))
+				.isInstanceOf(EventPublicationException.class)
+				.hasMessageContaining("NOT_FOUND");
+		verify(connectionFactory).resetConnection();
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {
+			"queue overflow",
+			"reply-code=404, reply-text=NOT_FOUND - no exchange 'trippie.content.dlx' in vhost '/'",
+			"reply-code=404, reply-text=NOT_FOUND - no exchange 'other' in vhost '/'",
+			"reply-code=406, reply-text=PRECONDITION_FAILED - inequivalent arg" })
+	void anyOtherNackLeavesTheConnectionAlone(String reason) {
+		answerWith(new CorrelationData.Confirm(false, reason), null);
+
+		assertThatThrownBy(() -> publisher.publish(TASK)).isInstanceOf(EventPublicationException.class);
+		verifyNoInteractions(connectionFactory);
+	}
+
+	@Test
+	void aNackWithoutAReasonLeavesTheConnectionAlone() {
+		answerWith(new CorrelationData.Confirm(false, null), null);
+
+		assertThatThrownBy(() -> publisher.publish(TASK)).isInstanceOf(EventPublicationException.class);
+		verifyNoInteractions(connectionFactory);
 	}
 
 	@Test

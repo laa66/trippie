@@ -200,6 +200,22 @@ public interface ContentRepository {
 	 */
 	void failGeneration(PoiContentKey key, Instant leasedAt, FailedClass failedClass, String failedDetail);
 
+	/**
+	 * Gives back a lease whose task the broker did not confirm: the row becomes {@code FAILED} with
+	 * {@link FailedClass#TRANSIENT}, the token dies, and the attempt the lease counted is refunded.
+	 *
+	 * <p>It is {@link #failGeneration} plus the refund, in one statement fenced the same strict way.
+	 * The refund is what keeps an outage of the broker from spending the row's budget: without it six
+	 * clicks against a dead broker park the POI for {@link #ATTEMPT_WINDOW} although no provider call
+	 * was ever made. It is safe because the dead token is the only thing a late-arriving task can
+	 * carry, and the worker's pre-check (M4-11) spends nothing on a token the row no longer bears.
+	 *
+	 * <p>A token that no longer matches changes nothing and refunds nothing.
+	 *
+	 * @throws NullPointerException if {@code leasedAt} is null
+	 */
+	void releaseUnpublishedLease(PoiContentKey key, Instant leasedAt);
+
 	/** The row for one key, or empty when nothing has ever been generated for it. */
 	Optional<PoiContent> find(PoiContentKey key);
 }

@@ -44,7 +44,9 @@ class ArchitectureTest {
 				"com.laa66.content.domain.port.out.EventPublisher",
 				"com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter",
 				"com.laa66.content.infrastructure.messaging.RabbitEventPublisher",
-				"com.laa66.content.infrastructure.web.ContentController");
+				"com.laa66.content.domain.service.GenerateContentService",
+				"com.laa66.content.infrastructure.web.ContentController",
+				"com.laa66.content.infrastructure.web.ContentGenerationController");
 
 		// Self-reference first: this class is a test, it is named here, and it cannot quietly stop
 		// existing while this assertion runs -- unlike a list of other class names, which goes

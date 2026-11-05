@@ -34,7 +34,7 @@ class PostgresContentAdapterTest {
 	private static final Instant TOKEN = Instant.parse("2026-10-30T12:00:00.123456Z");
 
 	@Test
-	void aNullTokenIsNamedAndRefusedOnBothWritesBeforeTheDatabase() {
+	void aNullTokenIsNamedAndRefusedOnEveryWriteBeforeTheDatabase() {
 		DataSource dataSource = mock(DataSource.class);
 		PostgresContentAdapter adapter = new PostgresContentAdapter(dataSource);
 
@@ -43,6 +43,9 @@ class PostgresContentAdapterTest {
 				.withMessage("leasedAt");
 		assertThatNullPointerException()
 				.isThrownBy(() -> adapter.failGeneration(KEY, null, FailedClass.TRANSIENT, "detail"))
+				.withMessage("leasedAt");
+		assertThatNullPointerException()
+				.isThrownBy(() -> adapter.releaseUnpublishedLease(KEY, null))
 				.withMessage("leasedAt");
 
 		verifyNoInteractions(dataSource);

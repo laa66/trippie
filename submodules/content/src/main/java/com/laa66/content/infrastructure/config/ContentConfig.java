@@ -9,9 +9,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+import com.laa66.content.domain.port.in.GenerateContent;
 import com.laa66.content.domain.port.in.ReadPoiContent;
 import com.laa66.content.domain.port.out.ContentRepository;
+import com.laa66.content.domain.port.out.EventPublisher;
 import com.laa66.content.domain.port.out.PoiUnlocks;
+import com.laa66.content.domain.service.GenerateContentService;
 import com.laa66.content.domain.service.ReadPoiContentService;
 import com.laa66.content.infrastructure.cache.CachingPoiUnlocks;
 import com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter;
@@ -54,5 +57,11 @@ public class ContentConfig {
 	@Bean
 	ReadPoiContent readPoiContent(PoiUnlocks poiUnlocks, ContentRepository contentRepository) {
 		return new ReadPoiContentService(poiUnlocks, contentRepository);
+	}
+
+	@Bean
+	GenerateContent generateContent(PoiUnlocks poiUnlocks, ContentRepository contentRepository,
+			EventPublisher eventPublisher) {
+		return new GenerateContentService(poiUnlocks, contentRepository, eventPublisher);
 	}
 }

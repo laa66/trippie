@@ -14,6 +14,7 @@ import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.ReturnedMessage;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitOperations;
 
@@ -35,15 +36,28 @@ import tools.jackson.databind.json.JsonMapper;
  * its own class, so the field names are the contract and a Java class name must not be. The mapper
  * is {@link JsonMapper#shared()} and not Boot's bean, so {@code spring.jackson.*} cannot reshape a
  * message another service reads. It writes the token as ISO-8601 text, which keeps every digit.
+ *
+ * <p><strong>A missing exchange resets the connection.</strong> The topology is declared when a
+ * connection opens, and a declaration that fails on an open connection (a broker that lost its
+ * definitions and refuses or misses the redeclaration on reconnect) leaves that connection cached
+ * with nothing to publish to: every publish then fails with 404 until the connection happens to
+ * drop. The publish that meets the 404 still fails, and the reset makes the next one open a new
+ * connection, which declares again. The 404 is only visible as the nack reason, which is the text of
+ * the broker's channel close, so it is matched as text.
  */
 public class RabbitEventPublisher implements EventPublisher {
 
+	private static final String MISSING_EXCHANGE = "NOT_FOUND - no exchange '" + GenerationTopology.EXCHANGE + "'";
+
 	private final RabbitOperations rabbit;
+
+	private final ConnectionFactory connectionFactory;
 
 	private final Duration confirmTimeout;
 
-	public RabbitEventPublisher(RabbitOperations rabbit, Duration confirmTimeout) {
+	public RabbitEventPublisher(RabbitOperations rabbit, ConnectionFactory connectionFactory, Duration confirmTimeout) {
 		this.rabbit = rabbit;
+		this.connectionFactory = connectionFactory;
 		this.confirmTimeout = confirmTimeout;
 	}
 
@@ -69,6 +83,9 @@ public class RabbitEventPublisher implements EventPublisher {
 		}
 
 		if (!confirm.ack()) {
+			if (confirm.reason() != null && confirm.reason().contains(MISSING_EXCHANGE)) {
+				connectionFactory.resetConnection();
+			}
 			throw new EventPublicationException("broker nacked the publish: " + confirm.reason());
 		}
 		ReturnedMessage returned = correlation.getReturned();

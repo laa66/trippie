@@ -260,6 +260,22 @@ class PostgresContentAdapter implements ContentRepository {
 			  AND started_at = :leasedAt
 			""";
 
+	/**
+	 * {@link #FAIL_SQL} with a fixed class and detail, plus {@code attempts - 1}. The fence is the
+	 * strict one: only the lease that was just taken can give its attempt back, so a stale token can
+	 * neither end somebody else's lease nor refund an attempt somebody else spent.
+	 */
+	static final String RELEASE_SQL = """
+			UPDATE poi_content
+			SET status        = 'FAILED',
+			    failed_class  = 'TRANSIENT',
+			    failed_detail = 'generation task not confirmed by the broker',
+			    started_at    = NULL,
+			    attempts      = attempts - 1
+			WHERE osm_id = :osmId AND mode = :mode AND lang = :lang
+			  AND started_at = :leasedAt
+			""";
+
 	static final String FIND_SQL = """
 			SELECT status, text, failed_class
 			FROM poi_content
@@ -329,6 +345,20 @@ class PostgresContentAdapter implements ContentRepository {
 
 		if (written == 0) {
 			log.debug("failure dropped for osmId={} mode={} lang={}: row no longer bears the lease token",
+					key.osmId(), key.mode(), key.lang());
+		}
+	}
+
+	@Override
+	public void releaseUnpublishedLease(PoiContentKey key, Instant leasedAt) {
+		Objects.requireNonNull(leasedAt, "leasedAt");
+
+		int written = key(jdbcClient.sql(RELEASE_SQL), key)
+				.param("leasedAt", timestamp(leasedAt))
+				.update();
+
+		if (written == 0) {
+			log.debug("release dropped for osmId={} mode={} lang={}: row no longer bears the lease token",
 					key.osmId(), key.mode(), key.lang());
 		}
 	}
