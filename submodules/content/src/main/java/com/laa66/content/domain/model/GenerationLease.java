@@ -23,6 +23,10 @@ import java.time.Instant;
  * <p><strong>Do not repair that by truncating both sides to milliseconds.</strong> Consecutive
  * takeover tokens were measured 2-3 ms apart in a test and are five minutes apart in production, so
  * the coarser token buys nothing; the fix belongs to whichever hop loses the precision.
+ *
+ * <p>{@code failedClass} is the row's class as the same statement left it, and it is non-null
+ * exactly when the outcome is {@link LeaseOutcome#ATTEMPTS_EXHAUSTED}: that answer is a
+ * {@code FAILED} row, and the client is told why in the same shape a read of the row would give.
  */
-public record GenerationLease(LeaseOutcome outcome, Instant leasedAt) {
+public record GenerationLease(LeaseOutcome outcome, Instant leasedAt, FailedClass failedClass) {
 }

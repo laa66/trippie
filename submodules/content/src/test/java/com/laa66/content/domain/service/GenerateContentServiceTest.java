@@ -21,10 +21,11 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
 
 import com.laa66.content.domain.model.ContentMode;
-import com.laa66.content.domain.model.ContentStatus;
 import com.laa66.content.domain.model.EventPublicationException;
+import com.laa66.content.domain.model.FailedClass;
 import com.laa66.content.domain.model.GenerateContentTask;
 import com.laa66.content.domain.model.GenerationLease;
+import com.laa66.content.domain.model.GenerationStatus;
 import com.laa66.content.domain.model.LeaseOutcome;
 import com.laa66.content.domain.model.PoiContentKey;
 import com.laa66.content.domain.model.PoiNotUnlockedException;
@@ -50,17 +51,21 @@ class GenerateContentServiceTest {
 	private final EventPublisher publisher = mock(EventPublisher.class);
 	private final GenerateContentService service = new GenerateContentService(poiUnlocks, repository, publisher);
 
-	private ContentStatus generateWith(LeaseOutcome outcome) {
-		when(poiUnlocks.isUnlocked(USER, POI)).thenReturn(true);
+	private GenerationStatus generateWith(LeaseOutcome outcome) {
 		boolean granted = outcome == LeaseOutcome.GRANTED || outcome == LeaseOutcome.RETRY_GRANTED;
-		when(repository.leaseGeneration(KEY)).thenReturn(new GenerationLease(outcome, granted ? TOKEN : null));
+		return generateWith(new GenerationLease(outcome, granted ? TOKEN : null, null));
+	}
+
+	private GenerationStatus generateWith(GenerationLease lease) {
+		when(poiUnlocks.isUnlocked(USER, POI)).thenReturn(true);
+		when(repository.leaseGeneration(KEY)).thenReturn(lease);
 		return service.generate(USER, POI, ContentMode.TEXT);
 	}
 
 	@ParameterizedTest
 	@EnumSource(value = LeaseOutcome.class, names = { "GRANTED", "RETRY_GRANTED" })
 	void aGrantedLeaseIsPublishedWithItsTokenAfterTheGateAndTheLease(LeaseOutcome outcome) {
-		assertThat(generateWith(outcome)).isEqualTo(ContentStatus.PROCESSING);
+		assertThat(generateWith(outcome)).isEqualTo(GenerationStatus.processing());
 
 		InOrder order = inOrder(poiUnlocks, repository, publisher);
 		order.verify(poiUnlocks).isUnlocked(USER, POI);
@@ -71,21 +76,24 @@ class GenerateContentServiceTest {
 
 	@Test
 	void aLeaseHeldByAnotherAttemptIsProcessingWithoutAPublish() {
-		assertThat(generateWith(LeaseOutcome.HELD_BY_ANOTHER_ATTEMPT)).isEqualTo(ContentStatus.PROCESSING);
+		assertThat(generateWith(LeaseOutcome.HELD_BY_ANOTHER_ATTEMPT)).isEqualTo(GenerationStatus.processing());
 
 		verifyNoInteractions(publisher);
 	}
 
 	@Test
 	void completedContentIsCompletedWithoutAPublish() {
-		assertThat(generateWith(LeaseOutcome.ALREADY_COMPLETED)).isEqualTo(ContentStatus.COMPLETED);
+		assertThat(generateWith(LeaseOutcome.ALREADY_COMPLETED)).isEqualTo(GenerationStatus.completed());
 
 		verifyNoInteractions(publisher);
 	}
 
-	@Test
-	void aRowOutOfBudgetIsFailedWithoutAPublish() {
-		assertThat(generateWith(LeaseOutcome.ATTEMPTS_EXHAUSTED)).isEqualTo(ContentStatus.FAILED);
+	/** The class the lease statement read off the row, in the same shape a read of the row gives. */
+	@ParameterizedTest
+	@EnumSource(FailedClass.class)
+	void aRowOutOfBudgetIsFailedWithTheRowsClassAndWithoutAPublish(FailedClass failedClass) {
+		assertThat(generateWith(new GenerationLease(LeaseOutcome.ATTEMPTS_EXHAUSTED, null, failedClass)))
+				.isEqualTo(GenerationStatus.failed(failedClass));
 
 		verifyNoInteractions(publisher);
 	}

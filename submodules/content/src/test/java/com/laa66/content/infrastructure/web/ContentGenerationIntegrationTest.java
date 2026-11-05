@@ -27,6 +27,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Message;
@@ -41,6 +42,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.testcontainers.rabbitmq.RabbitMQContainer;
 
 import com.laa66.content.domain.model.ContentMode;
+import com.laa66.content.domain.model.FailedClass;
 import com.laa66.content.domain.model.GenerateContentTask;
 import com.laa66.content.domain.model.PoiContentKey;
 import com.laa66.content.domain.port.out.ContentRepository;
@@ -224,7 +226,7 @@ class ContentGenerationIntegrationTest extends AbstractPostgresIntegrationTest {
 
 	@Test
 	void aFailedRowWithBudgetLeftIsLeasedAgainAndPublished() throws Exception {
-		seedFailed("node/open5", ContentRepository.MAX_ATTEMPTS_PER_ROW - 1);
+		seedFailed("node/open5", ContentRepository.MAX_ATTEMPTS_PER_ROW - 1, FailedClass.TRANSIENT);
 
 		HttpResponse<String> response = post(user, "node/open5", "TEXT");
 
@@ -233,17 +235,47 @@ class ContentGenerationIntegrationTest extends AbstractPostgresIntegrationTest {
 		assertThat(attempts("node/open5")).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
 	}
 
-	/** Without the cap, "Retry" is a loop over a paid API. */
-	@Test
-	void aRowOutOfBudgetIs200FailedAndNothingIsPublished() throws Exception {
-		seedFailed("node/open6", ContentRepository.MAX_ATTEMPTS_PER_ROW);
+	/**
+	 * Without the cap, "Retry" is a loop over a paid API. The answer is the shape {@code GET /content}
+	 * gives for the same row: {@code FAILED} with the class of its last failure.
+	 */
+	@ParameterizedTest
+	@EnumSource(FailedClass.class)
+	void aRowOutOfBudgetIs200FailedWithItsClassAndNothingIsPublished(FailedClass failedClass) throws Exception {
+		String poiId = "node/open6" + failedClass;
+		seedFailed(poiId, ContentRepository.MAX_ATTEMPTS_PER_ROW, failedClass);
 
-		HttpResponse<String> response = post(user, "node/open6", "TEXT");
+		HttpResponse<String> response = post(user, poiId, "TEXT");
 
 		assertThat(response.statusCode()).isEqualTo(200);
-		assertThat(response.body()).isEqualTo("{\"status\":\"FAILED\"}");
+		assertThat(response.body()).isEqualTo("{\"status\":\"FAILED\",\"failedClass\":\"" + failedClass + "\"}");
+		assertThat(read(poiId).body()).isEqualTo(response.body());
 		assertNoMessage();
-		assertThat(attempts("node/open6")).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
+		assertThat(attempts(poiId)).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
+	}
+
+	/**
+	 * The last lease of the budget was abandoned: no worker reported, the lease expired. The POST
+	 * parks the row as {@code FAILED}/{@code TRANSIENT}, and the read that follows says the same
+	 * instead of {@code PROCESSING} for the rest of the window.
+	 */
+	@Test
+	void anAbandonedLastLeaseIs200FailedTransientAndTheReadAgrees() throws Exception {
+		jdbc.sql("""
+				INSERT INTO poi_content (osm_id, mode, lang, status, attempts, started_at, last_attempt_at)
+				VALUES ('node/open9', 'TEXT', 'pl', 'PROCESSING', ?, now() - interval '6 minutes',
+				        now() - interval '6 minutes')
+				""").param(ContentRepository.MAX_ATTEMPTS_PER_ROW).update();
+
+		HttpResponse<String> response = post(user, "node/open9", "TEXT");
+
+		assertThat(response.statusCode()).isEqualTo(200);
+		assertThat(response.body()).isEqualTo("{\"status\":\"FAILED\",\"failedClass\":\"TRANSIENT\"}");
+		HttpResponse<String> read = read("node/open9");
+		assertThat(read.statusCode()).isEqualTo(200);
+		assertThat(read.body()).isEqualTo(response.body());
+		assertNoMessage();
+		assertThat(attempts("node/open9")).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
 	}
 
 	// --- the cross-cutting rows -----------------------------------------------------------------
@@ -290,9 +322,7 @@ class ContentGenerationIntegrationTest extends AbstractPostgresIntegrationTest {
 		assertThat(SPATIAL.requests()).isEqualTo(1);
 
 		for (int poll = 0; poll < 10; poll++) {
-			HttpResponse<String> read = client.send(HttpRequest.newBuilder(
-					URI.create("http://localhost:" + port + "/content?poiId=node/open7&mode=TEXT"))
-					.header("X-User-Id", user.toString()).build(), HttpResponse.BodyHandlers.ofString());
+			HttpResponse<String> read = read("node/open7");
 			assertThat(read.statusCode()).isEqualTo(200);
 			assertThat(read.body()).isEqualTo("{\"status\":\"PROCESSING\"}");
 		}
@@ -337,11 +367,17 @@ class ContentGenerationIntegrationTest extends AbstractPostgresIntegrationTest {
 				JsonMapper.shared().writeValueAsString(Map.of("poiId", poiId, "mode", mode)));
 	}
 
-	private void seedFailed(String osmId, int attempts) {
+	private HttpResponse<String> read(String poiId) throws Exception {
+		return client.send(HttpRequest.newBuilder(
+				URI.create("http://localhost:" + port + "/content?poiId=" + poiId + "&mode=TEXT"))
+				.header("X-User-Id", user.toString()).build(), HttpResponse.BodyHandlers.ofString());
+	}
+
+	private void seedFailed(String osmId, int attempts, FailedClass failedClass) {
 		jdbc.sql("""
 				INSERT INTO poi_content (osm_id, mode, lang, status, attempts, failed_class, last_attempt_at)
-				VALUES (?, 'TEXT', 'pl', 'FAILED', ?, 'TRANSIENT', now() - interval '1 hour')
-				""").params(osmId, attempts).update();
+				VALUES (?, 'TEXT', 'pl', 'FAILED', ?, ?, now() - interval '1 hour')
+				""").params(osmId, attempts, failedClass.name()).update();
 	}
 
 	private int attempts(String osmId) {

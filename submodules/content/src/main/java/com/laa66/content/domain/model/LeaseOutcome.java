@@ -35,7 +35,8 @@ public enum LeaseOutcome {
 	/**
 	 * The row has spent {@code MAX_ATTEMPTS_PER_ROW} inside the attempt window: no lease, no
 	 * publication, and no new attempt until the window passes. This is the value that keeps a
-	 * client's "Retry" from becoming a loop over a paid API.
+	 * client's "Retry" from becoming a loop over a paid API. The row is {@code FAILED} once the
+	 * statement is done, and its class travels with the answer.
 	 */
 	ATTEMPTS_EXHAUSTED
 }

@@ -111,6 +111,13 @@ public interface ContentRepository {
 	 * the content is already {@code COMPLETED}, and when the row has spent
 	 * {@link #MAX_ATTEMPTS_PER_ROW} inside {@link #ATTEMPT_WINDOW}.
 	 *
+	 * <p><strong>An exhausted answer carries the row's failure class, and one refusal writes to get
+	 * it.</strong> A {@code FAILED} row out of budget reports its own {@code failed_class}. A
+	 * {@code PROCESSING} row out of budget whose lease has expired has none — its last lease was
+	 * abandoned — so the same statement parks it as {@code FAILED} with
+	 * {@link FailedClass#TRANSIENT}, ends the abandoned lease and leaves the budget alone. Reads then
+	 * agree with the answer instead of serving {@code PROCESSING} for the rest of the window.
+	 *
 	 * <p><strong>Why one statement.</strong> "Read the row, decide, then write" is two snapshots:
 	 * two callers both read a {@code FAILED} row, both decide to retry, both publish, and the POI is
 	 * paid for twice. There is no way to express this as a check followed by a write that a later

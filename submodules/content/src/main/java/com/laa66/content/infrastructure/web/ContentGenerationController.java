@@ -10,14 +10,17 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.laa66.content.domain.model.ContentMode;
 import com.laa66.content.domain.model.ContentStatus;
+import com.laa66.content.domain.model.FailedClass;
+import com.laa66.content.domain.model.GenerationStatus;
 import com.laa66.content.domain.port.in.GenerateContent;
 
 /**
  * Inbound HTTP adapter for generation requests. It answers with a status only: a {@code 202} while a
- * task is queued or running, a {@code 200} when the answer is final. The text is read from
- * {@code GET /content}.
+ * task is queued or running, a {@code 200} when the answer is final. {@code failedClass} is present
+ * exactly on {@code FAILED}, as in {@code GET /content}, which is where the text is read from.
  *
  * <p>{@code X-User-Id} follows {@link ContentController}. A {@code poiId} that is empty or malformed is
  * not checked here either: it cannot name a POI and ends in the ordinary 403.
@@ -39,14 +42,15 @@ public class ContentGenerationController {
 		if (request.poiId() == null || request.mode() == null) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "poiId and mode are required");
 		}
-		ContentStatus status = generateContent.generate(userId, request.poiId(), request.mode());
-		return ResponseEntity.status(status == ContentStatus.PROCESSING ? HttpStatus.ACCEPTED : HttpStatus.OK)
-				.body(new GenerateResponse(status));
+		GenerationStatus answer = generateContent.generate(userId, request.poiId(), request.mode());
+		return ResponseEntity.status(answer.status() == ContentStatus.PROCESSING ? HttpStatus.ACCEPTED : HttpStatus.OK)
+				.body(new GenerateResponse(answer.status(), answer.failedClass()));
 	}
 
 	record GenerateRequest(String poiId, ContentMode mode) {
 	}
 
-	record GenerateResponse(ContentStatus status) {
+	@JsonInclude(JsonInclude.Include.NON_NULL)
+	record GenerateResponse(ContentStatus status, FailedClass failedClass) {
 	}
 }

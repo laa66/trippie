@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -29,6 +30,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import com.laa66.content.domain.model.ContentMode;
 import com.laa66.content.domain.model.EventPublicationException;
+import com.laa66.content.domain.model.FailedClass;
 import com.laa66.content.domain.model.GenerateContentTask;
 import com.laa66.content.domain.model.GenerationLease;
 import com.laa66.content.domain.model.LeaseOutcome;
@@ -81,8 +83,12 @@ class ContentGenerationControllerTest {
 	}
 
 	private ResultActions generateWith(LeaseOutcome outcome, Instant token) throws Exception {
+		return generateWith(new GenerationLease(outcome, token, null));
+	}
+
+	private ResultActions generateWith(GenerationLease lease) throws Exception {
 		when(poiUnlocks.isUnlocked(USER, POI)).thenReturn(true);
-		when(contentRepository.leaseGeneration(KEY)).thenReturn(new GenerationLease(outcome, token));
+		when(contentRepository.leaseGeneration(KEY)).thenReturn(lease);
 		return generate("{\"poiId\":\"node/42\",\"mode\":\"TEXT\"}");
 	}
 
@@ -114,11 +120,14 @@ class ContentGenerationControllerTest {
 		verifyNoInteractions(eventPublisher);
 	}
 
-	@Test
-	void anExhaustedBudgetIs200Failed() throws Exception {
-		generateWith(LeaseOutcome.ATTEMPTS_EXHAUSTED, null)
+	/** The shape {@code GET /content} serves for a {@code FAILED} row: the class, and nothing else. */
+	@ParameterizedTest
+	@EnumSource(FailedClass.class)
+	void anExhaustedBudgetIs200FailedWithTheRowsClass(FailedClass failedClass) throws Exception {
+		generateWith(new GenerationLease(LeaseOutcome.ATTEMPTS_EXHAUSTED, null, failedClass))
 				.andExpect(status().isOk())
-				.andExpect(content().json("{\"status\":\"FAILED\"}", JsonCompareMode.STRICT));
+				.andExpect(content().json("{\"status\":\"FAILED\",\"failedClass\":\"" + failedClass + "\"}",
+						JsonCompareMode.STRICT));
 
 		verifyNoInteractions(eventPublisher);
 	}

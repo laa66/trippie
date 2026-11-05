@@ -4,10 +4,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.laa66.content.domain.model.ContentMode;
-import com.laa66.content.domain.model.ContentStatus;
 import com.laa66.content.domain.model.EventPublicationException;
 import com.laa66.content.domain.model.GenerateContentTask;
 import com.laa66.content.domain.model.GenerationLease;
+import com.laa66.content.domain.model.GenerationStatus;
 import com.laa66.content.domain.model.PoiContentKey;
 import com.laa66.content.domain.model.PoiNotUnlockedException;
 import com.laa66.content.domain.model.UnsupportedContentModeException;
@@ -52,7 +52,7 @@ public class GenerateContentService implements GenerateContent {
 	}
 
 	@Override
-	public ContentStatus generate(UUID userId, String osmId, ContentMode mode) {
+	public GenerationStatus generate(UUID userId, String osmId, ContentMode mode) {
 		if (mode != ContentMode.TEXT) {
 			throw new UnsupportedContentModeException();
 		}
@@ -65,11 +65,11 @@ public class GenerateContentService implements GenerateContent {
 		return switch (lease.outcome()) {
 			case GRANTED, RETRY_GRANTED -> {
 				publish(key, lease.leasedAt());
-				yield ContentStatus.PROCESSING;
+				yield GenerationStatus.processing();
 			}
-			case HELD_BY_ANOTHER_ATTEMPT -> ContentStatus.PROCESSING;
-			case ALREADY_COMPLETED -> ContentStatus.COMPLETED;
-			case ATTEMPTS_EXHAUSTED -> ContentStatus.FAILED;
+			case HELD_BY_ANOTHER_ATTEMPT -> GenerationStatus.processing();
+			case ALREADY_COMPLETED -> GenerationStatus.completed();
+			case ATTEMPTS_EXHAUSTED -> GenerationStatus.failed(lease.failedClass());
 		};
 	}
 

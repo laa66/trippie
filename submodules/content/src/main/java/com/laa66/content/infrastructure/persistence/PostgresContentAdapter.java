@@ -43,7 +43,7 @@ class PostgresContentAdapter implements ContentRepository {
 	/**
 	 * Lease, dedup and takeover in one statement, one round trip, one decision.
 	 *
-	 * <p>The three CTEs answer three different questions and must stay in this order.
+	 * <p>The CTEs answer four different questions and must stay in this order.
 	 *
 	 * <p><strong>{@code locked}</strong> takes the row lock before anything is decided.
 	 * {@code SELECT ... FOR UPDATE} under READ COMMITTED waits for a concurrent writer and then
@@ -57,20 +57,35 @@ class PostgresContentAdapter implements ContentRepository {
 	 * module that notices, which is why that test establishes its interleaving through the server
 	 * rather than through thread timing.
 	 *
-	 * <p>{@code existing} is materialised by its four references anyway, and {@code locked} has only
+	 * <p>{@code existing} is materialised by its many references anyway, and {@code locked} has only
 	 * one, so there the keyword rather than the count says it; on both it pins "count once" against
 	 * inlining, and no test observes it.
 	 *
-	 * <p><strong>{@code existing}</strong> names the three facts the decision is made of, each
-	 * written exactly once: the attempt budget is spent, the lease is over, the row is leasable. The
-	 * nesting is not decoration — a SELECT list cannot reference its own aliases, and the alternative
-	 * is repeating the interval predicates in two places where they would be free to drift apart.
+	 * <p><strong>{@code existing}</strong> names the facts the decision is made of, each written
+	 * exactly once: the attempt budget is spent, the lease is over, the row is leasable, the row is
+	 * abandoned. The nesting is not decoration — a SELECT list cannot reference its own aliases, and
+	 * the alternative is repeating the interval predicates in two places where they would be free to
+	 * drift apart.
 	 * A missing row makes every value NULL, and NULL is not TRUE, so the refusal is the default.
 	 *
-	 * <p><strong>{@code leased}</strong> is the write. The {@code INSERT} covers "no row yet"; the
-	 * {@code ON CONFLICT ... DO UPDATE} covers takeover and retry, guarded by the one predicate
+	 * <p><strong>{@code leased}</strong> is the lease write. The {@code INSERT} covers "no row yet";
+	 * the {@code ON CONFLICT ... DO UPDATE} covers takeover and retry, guarded by the one predicate
 	 * computed above. It returns a row if and only if the lease was granted, which is what makes the
-	 * outcome unambiguous.
+	 * outcome unambiguous. It does not run at all on an abandoned row, which {@code parked} writes
+	 * instead. Measured without that guard: the statement works only while the final SELECT happens
+	 * to evaluate {@code leased} before {@code parked}; reference {@code parked} first and Postgres
+	 * raises "ON CONFLICT DO UPDATE command cannot affect row a second time" on every abandoned row.
+	 *
+	 * <p><strong>{@code parked}</strong> is the one refusal that writes. An abandoned row is
+	 * {@code PROCESSING} under an expired lease with its budget spent: the last lease of the window
+	 * went out and nobody reported back. It is refused like any exhausted row, but left as it is it
+	 * has no class for the answer to carry (the {@code PROCESSING} arm forbids one) and a read keeps
+	 * serving {@code PROCESSING} for the rest of the window. So it becomes {@code FAILED} with
+	 * {@code TRANSIENT}, {@code started_at} cleared and the budget untouched: the dead token's late
+	 * failure is then dropped by the strict fence, while a late success still lands through the
+	 * completion's {@code text IS NULL} arm. The class the answer carries is the one this write
+	 * returned or, on an exhausted {@code FAILED} row, the one {@code locked} read under the row lock;
+	 * both come from this statement, so no second read can see a different row.
 	 *
 	 * <p><strong>{@code SET started_at = now()} is load-bearing and no constraint enforces it.</strong>
 	 * {@code poi_content_state_check} asks a {@code PROCESSING} row for a non-null
@@ -118,18 +133,21 @@ class PostgresContentAdapter implements ContentRepository {
 	 */
 	static final String LEASE_SQL = """
 			WITH locked AS MATERIALIZED (
-			    SELECT status, attempts, started_at, last_attempt_at
+			    SELECT status, attempts, started_at, last_attempt_at, failed_class
 			    FROM poi_content
 			    WHERE osm_id = :osmId AND mode = :mode AND lang = :lang
 			    FOR UPDATE
 			),
 			existing AS MATERIALIZED (
 			    SELECT status,
+			           failed_class,
 			           budget_spent,
 			           status = 'PROCESSING' AND NOT lease_over AS lease_live,
-			           status <> 'COMPLETED' AND lease_over AND NOT budget_spent AS leasable
+			           status <> 'COMPLETED' AND lease_over AND NOT budget_spent AS leasable,
+			           status = 'PROCESSING' AND lease_over AND budget_spent AS abandoned
 			    FROM (
 			        SELECT status,
+			               failed_class,
 			               status = 'FAILED'
 			                   OR started_at < now() - make_interval(secs => :leaseSeconds) AS lease_over,
 			               attempts >= :maxAttempts
@@ -141,7 +159,8 @@ class PostgresContentAdapter implements ContentRepository {
 			leased AS (
 			    INSERT INTO poi_content AS target
 			        (osm_id, mode, lang, status, attempts, started_at, last_attempt_at)
-			    VALUES (:osmId, :mode, :lang, 'PROCESSING', 1, now(), now())
+			    SELECT :osmId, :mode, :lang, 'PROCESSING', 1, now(), now()
+			    WHERE NOT coalesce((SELECT abandoned FROM existing), false)
 			    ON CONFLICT (osm_id, mode, lang) DO UPDATE
 			    SET status          = 'PROCESSING',
 			        started_at      = now(),
@@ -157,12 +176,24 @@ class PostgresContentAdapter implements ContentRepository {
 			        failed_detail   = NULL
 			    WHERE (SELECT leasable FROM existing)
 			    RETURNING started_at
+			),
+			parked AS (
+			    UPDATE poi_content
+			    SET status        = 'FAILED',
+			        failed_class  = 'TRANSIENT',
+			        failed_detail = 'lease expired without a result',
+			        started_at    = NULL
+			    WHERE osm_id = :osmId AND mode = :mode AND lang = :lang
+			      AND (SELECT abandoned FROM existing)
+			    RETURNING failed_class
 			)
 			SELECT EXISTS (SELECT 1 FROM leased)                          AS leased,
 			       (SELECT started_at FROM leased)                        AS leased_at,
 			       (SELECT status FROM existing)                          AS prior_status,
 			       coalesce((SELECT lease_live FROM existing), false)     AS lease_live,
-			       coalesce((SELECT budget_spent FROM existing), false)   AS budget_spent
+			       coalesce((SELECT budget_spent FROM existing), false)   AS budget_spent,
+			       coalesce((SELECT failed_class FROM parked),
+			                (SELECT failed_class FROM existing))          AS failed_class
 			""";
 
 	/**
@@ -296,10 +327,13 @@ class PostgresContentAdapter implements ContentRepository {
 				.param("leaseSeconds", GENERATION_LEASE_TIMEOUT.toSeconds())
 				.param("windowSeconds", ATTEMPT_WINDOW.toSeconds())
 				.param("maxAttempts", MAX_ATTEMPTS_PER_ROW)
-				.query((rs, rowNum) -> new GenerationLease(
-						outcome(rs.getBoolean("leased"), rs.getString("prior_status"),
-								rs.getBoolean("lease_live"), rs.getBoolean("budget_spent")),
-						token(rs.getObject("leased_at", OffsetDateTime.class))))
+				.query((rs, rowNum) -> {
+					LeaseOutcome outcome = outcome(rs.getBoolean("leased"), rs.getString("prior_status"),
+							rs.getBoolean("lease_live"), rs.getBoolean("budget_spent"));
+					return new GenerationLease(outcome,
+							token(rs.getObject("leased_at", OffsetDateTime.class)),
+							outcome == LeaseOutcome.ATTEMPTS_EXHAUSTED ? failedClass(rs.getString("failed_class")) : null);
+				})
 				.single();
 	}
 

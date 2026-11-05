@@ -3,6 +3,9 @@ package com.laa66.content.infrastructure.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -15,11 +18,14 @@ import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import com.laa66.content.domain.model.ContentMode;
+import com.laa66.content.domain.model.FailedClass;
 import com.laa66.content.domain.model.GenerationLease;
 import com.laa66.content.domain.model.LeaseOutcome;
 import com.laa66.content.domain.model.PoiContentKey;
@@ -170,16 +176,90 @@ class PoiContentLeaseIntegrationTest extends AbstractPostgresIntegrationTest {
 		assertThat(attempts()).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
 	}
 
+	/** An exhausted answer carries the class of the row's last failure, read in the same statement. */
+	@ParameterizedTest
+	@EnumSource(FailedClass.class)
+	void aRowOutOfBudgetReportsItsOwnFailureClass(FailedClass failedClass) {
+		seedFailed(failedClass.name(), ContentRepository.MAX_ATTEMPTS_PER_ROW, "1 hour");
+
+		GenerationLease refused = repository.leaseGeneration(KEY);
+
+		assertThat(refused.outcome()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+		assertThat(refused.failedClass()).isEqualTo(failedClass);
+		assertThat(string("failed_class")).isEqualTo(failedClass.name());
+		assertThat(string("failed_detail")).isEqualTo("provider said no");
+	}
+
 	/**
 	 * An abandoned {@code PROCESSING} row that is out of budget is reported as exhausted, not as
 	 * held: nobody is working on it and nobody will, so answering "a lease is held" would promise a
 	 * result that is never coming. This is the half of the pair where the budget decides.
+	 *
+	 * <p>The statement also parks it as {@code FAILED}/{@code TRANSIENT}: a {@code PROCESSING} row has
+	 * no class to report, and a read would otherwise keep answering {@code PROCESSING} for the rest of
+	 * the window. The budget is untouched, so the window still ends when it would have.
 	 */
 	@Test
-	void anExpiredLeaseOnARowOutOfBudgetIsExhaustedRatherThanHeld() {
+	void anExpiredLeaseOnARowOutOfBudgetIsExhaustedAndParkedAsTransient() {
 		seedProcessing("6 minutes", ContentRepository.MAX_ATTEMPTS_PER_ROW);
+		String lastAttemptAt = string("last_attempt_at::text");
 
-		assertThat(lease()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+		GenerationLease refused = repository.leaseGeneration(KEY);
+
+		assertThat(refused.outcome()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+		assertThat(refused.leasedAt()).isNull();
+		assertThat(refused.failedClass()).isEqualTo(FailedClass.TRANSIENT);
+		assertThat(status()).isEqualTo("FAILED");
+		assertThat(string("failed_class")).isEqualTo("TRANSIENT");
+		assertThat(string("failed_detail")).isEqualTo("lease expired without a result");
+		assertThat(bool("started_at IS NULL")).as("the abandoned token is dead").isTrue();
+		assertThat(attempts()).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
+		assertThat(string("last_attempt_at::text")).isEqualTo(lastAttemptAt);
+
+		GenerationLease again = repository.leaseGeneration(KEY);
+		assertThat(again.outcome()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+		assertThat(again.failedClass()).isEqualTo(FailedClass.TRANSIENT);
+	}
+
+	/** The abandoned worker's failure belongs to a lease that is over, so the fence drops it. */
+	@Test
+	void aLateFailureFromTheAbandonedLeaseIsDroppedAfterParking() {
+		seedProcessing("6 minutes", ContentRepository.MAX_ATTEMPTS_PER_ROW);
+		Instant abandonedToken = startedAt();
+		repository.leaseGeneration(KEY);
+
+		repository.failGeneration(KEY, abandonedToken, FailedClass.PERMANENT, "late");
+
+		assertThat(string("failed_class")).isEqualTo("TRANSIENT");
+		assertThat(string("failed_detail")).isEqualTo("lease expired without a result");
+	}
+
+	/** Paid-for text still lands on a parked row: a completion may add content it does not own. */
+	@Test
+	void aLateSuccessFromTheAbandonedLeaseStillLandsAfterParking() {
+		seedProcessing("6 minutes", ContentRepository.MAX_ATTEMPTS_PER_ROW);
+		Instant abandonedToken = startedAt();
+		repository.leaseGeneration(KEY);
+
+		repository.completeGeneration(KEY, abandonedToken, "late guide", "v1");
+
+		assertThat(status()).isEqualTo("COMPLETED");
+		assertThat(string("text")).isEqualTo("late guide");
+		assertThat(bool("failed_class IS NULL AND failed_detail IS NULL")).isTrue();
+		assertThat(lease()).isEqualTo(LeaseOutcome.ALREADY_COMPLETED);
+	}
+
+	/** Only an exhausted answer carries a class; a retry of a failed row does not hand its old one on. */
+	@Test
+	void noOtherOutcomeCarriesAClass() {
+		seedFailed("QUOTA", 1, "1 hour");
+		GenerationLease retry = repository.leaseGeneration(KEY);
+		assertThat(retry.outcome()).isEqualTo(LeaseOutcome.RETRY_GRANTED);
+		assertThat(retry.failedClass()).isNull();
+
+		GenerationLease held = repository.leaseGeneration(KEY);
+		assertThat(held.outcome()).isEqualTo(LeaseOutcome.HELD_BY_ANOTHER_ATTEMPT);
+		assertThat(held.failedClass()).isNull();
 	}
 
 	/**
@@ -194,6 +274,7 @@ class PoiContentLeaseIntegrationTest extends AbstractPostgresIntegrationTest {
 		seedProcessing("1 minute", ContentRepository.MAX_ATTEMPTS_PER_ROW);
 
 		assertThat(lease()).isEqualTo(LeaseOutcome.HELD_BY_ANOTHER_ATTEMPT);
+		assertThat(status()).as("a live lease is not parked").isEqualTo("PROCESSING");
 	}
 
 	/** The last attempt in the budget is still an attempt: the cap is a bound, not an off-by-one. */
@@ -400,6 +481,87 @@ class PoiContentLeaseIntegrationTest extends AbstractPostgresIntegrationTest {
 		assertThat(attempts()).as("one takeover, one attempt spent").isEqualTo(2);
 	}
 
+	/**
+	 * Two posts on an abandoned row, ordered by the server: the first parks it and holds its
+	 * transaction open, the second blocks on the row lock. After the commit the second must see the
+	 * parked row — {@code FAILED}, out of budget — and answer from it without writing it again.
+	 *
+	 * <p>The answer alone would not show a second write: without the row lock the second statement
+	 * decides "abandoned" from its stale snapshot, its {@code parked} UPDATE waits, re-checks only
+	 * the key after the commit, and parks the row a second time with the same class. The row's
+	 * {@code xmin} is what tells the two apart: it must still be the first transaction's.
+	 */
+	@Test
+	void anOrderedRaceOnAnAbandonedRowParksItOnce() throws Exception {
+		seedProcessing("6 minutes", ContentRepository.MAX_ATTEMPTS_PER_ROW);
+
+		ExecutorService executor = Executors.newSingleThreadExecutor();
+		String parkingTransaction;
+		try (Connection first = dataSource.getConnection(); Connection second = dataSource.getConnection()) {
+			first.setAutoCommit(false);
+			second.setAutoCommit(false);
+
+			GenerationLease parked = adapterOn(first).leaseGeneration(KEY);
+			assertThat(parked.outcome()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+			assertThat(parked.failedClass()).isEqualTo(FailedClass.TRANSIENT);
+			parkingTransaction = transactionId(first);
+
+			Future<GenerationLease> blocked = executor.submit(() -> adapterOn(second).leaseGeneration(KEY));
+			awaitAnotherBackendBlockedOnALock();
+			first.commit();
+
+			GenerationLease answer = blocked.get(30, TimeUnit.SECONDS);
+			second.commit();
+			assertThat(answer.outcome()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+			assertThat(answer.failedClass()).isEqualTo(FailedClass.TRANSIENT);
+		}
+		finally {
+			executor.shutdownNow();
+		}
+
+		assertThat(string("xmin::text")).as("the row was written by the parking transaction only")
+				.isEqualTo(parkingTransaction);
+		assertThat(status()).isEqualTo("FAILED");
+		assertThat(attempts()).isEqualTo(ContentRepository.MAX_ATTEMPTS_PER_ROW);
+	}
+
+	/**
+	 * The abandoned worker does report after all, and its failure commits while a lease is waiting
+	 * on the row. The token still matched, so that failure is the row's real last word: the lease
+	 * must see {@code FAILED}/{@code PERMANENT} out of budget, leave it alone and answer
+	 * {@code PERMANENT}. Without the row lock it decides "abandoned" from its snapshot and parks over
+	 * the worker's verdict with {@code TRANSIENT} — a permanent failure reported to the client as
+	 * worth retrying tomorrow.
+	 */
+	@Test
+	void aLateFailureThatCommitsWhileALeaseWaitsIsNotParkedOver() throws Exception {
+		seedProcessing("6 minutes", ContentRepository.MAX_ATTEMPTS_PER_ROW);
+		Instant abandonedToken = startedAt();
+
+		ExecutorService executor = Executors.newSingleThreadExecutor();
+		try (Connection worker = dataSource.getConnection(); Connection lease = dataSource.getConnection()) {
+			worker.setAutoCommit(false);
+			lease.setAutoCommit(false);
+
+			adapterOn(worker).failGeneration(KEY, abandonedToken, FailedClass.PERMANENT, "provider said no");
+
+			Future<GenerationLease> blocked = executor.submit(() -> adapterOn(lease).leaseGeneration(KEY));
+			awaitAnotherBackendBlockedOnALock();
+			worker.commit();
+
+			GenerationLease answer = blocked.get(30, TimeUnit.SECONDS);
+			lease.commit();
+			assertThat(answer.outcome()).isEqualTo(LeaseOutcome.ATTEMPTS_EXHAUSTED);
+			assertThat(answer.failedClass()).isEqualTo(FailedClass.PERMANENT);
+		}
+		finally {
+			executor.shutdownNow();
+		}
+
+		assertThat(string("failed_class")).isEqualTo("PERMANENT");
+		assertThat(string("failed_detail")).isEqualTo("provider said no");
+	}
+
 	private LeaseOutcome lease() {
 		return repository.leaseGeneration(KEY).outcome();
 	}
@@ -409,15 +571,25 @@ class PoiContentLeaseIntegrationTest extends AbstractPostgresIntegrationTest {
 		return lease();
 	}
 
+	private LeaseOutcome leaseOn(Connection connection) {
+		return adapterOn(connection).leaseGeneration(KEY).outcome();
+	}
+
 	/**
 	 * Drives the real adapter on one specific connection, so a test can hold its transaction open.
 	 * The injected port goes through the pool and gives no control over which connection it uses or
 	 * when that connection commits.
 	 */
-	private LeaseOutcome leaseOn(Connection connection) {
-		return new PostgresContentAdapter(new SingleConnectionDataSource(connection, true))
-				.leaseGeneration(KEY)
-				.outcome();
+	private static PostgresContentAdapter adapterOn(Connection connection) {
+		return new PostgresContentAdapter(new SingleConnectionDataSource(connection, true));
+	}
+
+	private static String transactionId(Connection connection) throws SQLException {
+		try (Statement statement = connection.createStatement();
+				ResultSet result = statement.executeQuery("SELECT pg_current_xact_id()::xid::text")) {
+			result.next();
+			return result.getString(1);
+		}
 	}
 
 	/**
