@@ -1,0 +1,7 @@
+# `test` profile, active for all Gradle test tasks (SPRING_PROFILES_ACTIVE=test, set in
+# build.gradle.kts). Points the broker at a closed port so context tests run without Docker; the
+# integration tests re-point it via @DynamicPropertySource (highest precedence).
+spring:
+  rabbitmq:
+    host: 127.0.0.1
+    port: 1

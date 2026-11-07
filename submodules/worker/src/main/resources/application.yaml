@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: worker
+  threads:
+    virtual:
+      enabled: true
+  # Credentials come from SPRING_RABBITMQ_USERNAME/PASSWORD at runtime and none are baked into the
+  # image. Unset, Boot falls back to guest/guest, which compose's broker does not have. The listener's
+  # delivery policy (concurrency, prefetch, retries, requeue) is set in MessagingConfig, not here.
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:rabbitmq}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    connection-timeout: 2s
+
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+  # Unlike content, the broker IS part of /health: a worker without it has nothing to do, so DOWN is
+  # the truthful answer. Nothing depends_on the worker, so this cannot hold back the stack.

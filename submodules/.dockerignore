@@ -5,8 +5,8 @@
 # the rule is: no module that compose builds from this context may appear here.
 # A module with its OWN build context stays listed and still builds — gui and
 # spatial-loader are built from ../submodules/gui and ../submodules/spatial-loader.
-# content left the list in M4-02 because its Dockerfile builds from here; worker
-# stays until M4-09 gives it one.
+# content left the list in M4-02 and worker in M4-09, because their Dockerfiles
+# build from here.
 **/build
 **/.gradle
 **/node_modules
@@ -14,5 +14,4 @@
 **/dist-ssr
 **/.git
 gui
-worker
 spatial-loader

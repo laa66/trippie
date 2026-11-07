@@ -7,7 +7,7 @@ build:
 	$(COMPOSE) build
 
 # Bring up the default backend stack (postgres, redis, rabbitmq, tileserver-gl,
-# spatial, content, auth, gateway, gui) detached.
+# spatial, content, worker, auth, gateway, gui) detached.
 # Guard: the mbtiles must already exist as a FILE. If it is missing, Docker would
 # create a root-owned directory at the bind-mount path and tileserver-gl would
 # crash-loop — fail fast instead and point at `make tiles`.
@@ -106,6 +106,7 @@ unit-test:
 	( cd submodules/commons && ./gradlew unitTest --rerun )
 	( cd submodules/spatial && ./gradlew unitTest --rerun )
 	( cd submodules/content && ./gradlew unitTest --rerun )
+	( cd submodules/worker && ./gradlew unitTest --rerun )
 	( cd submodules/gateway && ./gradlew unitTest --rerun )
 	( cd submodules/auth && ./gradlew unitTest --rerun )
 	( cd submodules/spatial-loader && go test -short ./... )
@@ -115,6 +116,7 @@ int-test:
 	( cd submodules/commons && ./gradlew integrationTest )
 	( cd submodules/spatial && ./gradlew integrationTest )
 	( cd submodules/content && ./gradlew integrationTest )
+	( cd submodules/worker && ./gradlew integrationTest )
 	( cd submodules/gateway && ./gradlew integrationTest )
 	( cd submodules/auth && ./gradlew integrationTest )
 	( cd submodules/spatial-loader && go test -count=1 ./internal/loader/... )
