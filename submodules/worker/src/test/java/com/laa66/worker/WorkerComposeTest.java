@@ -32,4 +32,20 @@ class WorkerComposeTest {
 				.containsPattern("(?m)^      rabbitmq:\\n        condition: service_healthy$")
 				.contains("http://localhost:8080/health");
 	}
+
+	/**
+	 * The key arrives as a file on a read-only mount of the gitignored infra/secrets/, never as an
+	 * env value: env values show up in {@code docker inspect}.
+	 */
+	@Test
+	void theWorkerReadsTheGeminiKeyFromAReadOnlySecretsMount() throws IOException {
+		Matcher service = Pattern.compile("(?ms)^  worker:\\n(.*?)(?=^  \\S)").matcher(Files.readString(COMPOSE));
+		assertThat(service.find()).isTrue();
+
+		assertThat(service.group(1))
+				.containsPattern("(?m)^      GEMINI_API_KEY_FILE: /secrets/gemini\\.key$")
+				.containsPattern("(?m)^    volumes:\\n      - \\./secrets:/secrets:ro$")
+				.doesNotContainPattern("GEMINI_API_KEY:");
+		assertThat(Files.readString(Path.of("../../.gitignore"))).containsPattern("(?m)^infra/secrets/$");
+	}
 }

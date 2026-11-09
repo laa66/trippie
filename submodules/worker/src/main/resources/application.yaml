@@ -18,5 +18,23 @@ management:
       base-path: /
       exposure:
         include: health
+  # Details are on so a DOWN names its reason (gemini: the key file problem). The worker has no
+  # host port and no gateway route; no detail carries a secret.
+  endpoint:
+    health:
+      show-details: always
   # Unlike content, the broker IS part of /health: a worker without it has nothing to do, so DOWN is
   # the truthful answer. Nothing depends_on the worker, so this cannot hold back the stack.
+
+# Provider. The key is never a property: GEMINI_API_KEY_FILE names a file (compose mounts
+# infra/secrets/ read-only at /secrets), read once at startup. Unset, missing or empty -> the
+# listener is not started and /health is DOWN with the reason. Timeout, pacing and the text length
+# limit are constants in code, not here.
+trippie:
+  gemini:
+    api-key-file: ${GEMINI_API_KEY_FILE:}
+    base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
+    model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
+    # Thinking tokens count against this limit (thinking pinned to MINIMAL in GeminiTextGenerator).
+    # 250 Polish words are ~500 output tokens; re-check against the smoke measurement in PROGRESS.md.
+    max-output-tokens: ${GEMINI_MAX_OUTPUT_TOKENS:1024}

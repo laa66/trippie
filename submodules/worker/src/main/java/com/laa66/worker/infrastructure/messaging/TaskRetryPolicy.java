@@ -1,13 +1,19 @@
 package com.laa66.worker.infrastructure.messaging;
 
 import java.time.Duration;
+import java.util.function.Consumer;
 
 import org.aopalliance.intercept.MethodInterceptor;
+import org.springframework.amqp.ImmediateRequeueAmqpException;
 import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
+import org.springframework.amqp.rabbit.retry.MessageRecoverer;
 import org.springframework.amqp.rabbit.retry.RejectAndDontRequeueRecoverer;
 import org.springframework.core.retry.RetryPolicy;
 
+import com.laa66.worker.domain.model.FailedClass;
 import com.laa66.worker.domain.model.PermanentTaskException;
+import com.laa66.worker.domain.model.ProviderCredentialRejectedException;
+import com.laa66.worker.domain.model.TextGenerationException;
 import com.laa66.worker.domain.model.TransientTaskException;
 
 /**
@@ -24,11 +30,15 @@ import com.laa66.worker.domain.model.TransientTaskException;
  * exception nobody classified, costs exactly one attempt: a poisoned POI must cost one provider
  * request, not three, and that is the largest saving of quota in the whole policy.
  *
+ * <p><strong>A {@link ProviderCredentialRejectedException} is neither retried nor
+ * dead-lettered.</strong> It is not about the task: the consumer is stopped and the task goes back to
+ * the queue (see {@link #recoverer(Consumer)}).
+ *
  * <h2>Worst case against content's lease (review M4-08a, LOW-3)</h2>
  *
  * <p>Content takes the lease before it publishes, so the lease clock is already running when the
- * message enters the queue. Assumed: {@code PROVIDER_TIMEOUT = 20 s} (M4-10's accept; not in code
- * yet) and the M4-11 calls around it (pre-check, POI detail, write-back) negligible next to it. One delivery that fails transiently
+ * message enters the queue. Assumed: {@code GeminiTextGenerator.PROVIDER_TIMEOUT} (20 s) and the
+ * M4-11 calls around it (pre-check, POI detail, write-back) negligible next to it. One delivery that fails transiently
  * every time, from the moment the consumer takes it to the end of its last provider attempt:
  *
  * <pre>
@@ -86,26 +96,54 @@ public final class TaskRetryPolicy {
 	}
 
 	/**
-	 * Retries per {@link #retryPolicy()}; an exhausted or final failure is rejected without requeue.
+	 * Retries per {@link #retryPolicy()}, then hands the last failure to {@link #recoverer(Consumer)}.
 	 *
 	 * <p><strong>The recoverer is load-bearing.</strong> Without one, Spring AMQP's stateless
 	 * interceptor logs "Message(s) dropped on recovery" and the delivery is ACKED: the task is gone,
 	 * not dead-lettered, and the container's {@code defaultRequeueRejected=false} never sees an
 	 * exception. Measured by mutation: removing this line keeps every task out of the DLQ.
 	 */
-	public static MethodInterceptor interceptor() {
+	public static MethodInterceptor interceptor(Consumer<ProviderCredentialRejectedException> onCredentialRejected) {
 		return RetryInterceptorBuilder.stateless()
 				.retryPolicy(retryPolicy())
-				.recoverer(new RejectAndDontRequeueRecoverer())
+				.recoverer(recoverer(onCredentialRejected))
 				.build();
+	}
+
+	/**
+	 * A rejected credential goes to {@code onCredentialRejected}, then back to the queue; every other
+	 * exhausted or final failure is rejected without requeue, into the DLQ.
+	 *
+	 * <p>{@code onCredentialRejected} runs on the consumer thread before the requeue, so stopping the
+	 * container there cancels the consumer on the broker before the message is handed back: the
+	 * broker has nobody to redeliver it to, and the provider is not called again.
+	 */
+	static MessageRecoverer recoverer(Consumer<ProviderCredentialRejectedException> onCredentialRejected) {
+		MessageRecoverer reject = new RejectAndDontRequeueRecoverer();
+		return (message, cause) -> {
+			ProviderCredentialRejectedException rejected = credentialRejection(cause);
+			if (rejected == null) {
+				reject.recover(message, cause);
+				return;
+			}
+			onCredentialRejected.accept(rejected);
+			throw new ImmediateRequeueAmqpException("provider credential rejected, the task goes back to the queue", rejected);
+		};
 	}
 
 	/**
 	 * The listener container wraps whatever the listener throws, so the classification walks the
 	 * cause chain. The first classified failure decides: a permanent failure that carries a
 	 * transient one as its cause is permanent.
+	 *
+	 * <p>A provider failure is retried only when it is {@link FailedClass#TRANSIENT}. A spent daily
+	 * quota does not come back within the 20 s of backoff, so {@link FailedClass#QUOTA} costs one
+	 * attempt, like a permanent failure.
 	 */
 	static boolean isTransient(Throwable failure) {
+		if (credentialRejection(failure) != null) {
+			return false;
+		}
 		for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
 			if (cause instanceof TransientTaskException) {
 				return true;
@@ -113,7 +151,20 @@ public final class TaskRetryPolicy {
 			if (cause instanceof PermanentTaskException) {
 				return false;
 			}
+			if (cause instanceof TextGenerationException generation) {
+				return generation.failedClass() == FailedClass.TRANSIENT;
+			}
 		}
 		return false;
+	}
+
+	/** Anywhere in the chain: a credential rejection decides over every classification around it. */
+	private static ProviderCredentialRejectedException credentialRejection(Throwable failure) {
+		for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+			if (cause instanceof ProviderCredentialRejectedException rejected) {
+				return rejected;
+			}
+		}
+		return null;
 	}
 }

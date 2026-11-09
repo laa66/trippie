@@ -209,6 +209,12 @@ services:
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: trippie
       SPRING_RABBITMQ_PASSWORD: trippie
+      # The Gemini key is a FILE the user fills in (infra/secrets/gemini.key, created empty by
+      # `make up`), never an env value. Empty or missing -> the worker does not consume and its
+      # /health is DOWN naming the reason.
+      GEMINI_API_KEY_FILE: /secrets/gemini.key
+    volumes:
+      - ./secrets:/secrets:ro
     # Not depends_on: content. The worker declares the same topology itself, so the order of the
     # two does not matter.
     depends_on:

@@ -5,3 +5,10 @@ spring:
   rabbitmq:
     host: 127.0.0.1
     port: 1
+
+# A fake key, so the listener starts as in production. Relative to the module directory, which is
+# Gradle's working directory for tests. The no-key path is tested by overriding this property.
+trippie:
+  gemini:
+    api-key-file: src/test/resources/fake-gemini.key
+    base-url: http://127.0.0.1:1

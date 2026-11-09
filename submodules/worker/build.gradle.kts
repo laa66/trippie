@@ -45,10 +45,18 @@ tasks.withType<Test> {
 // Split by class name: ITs (*IntegrationTest / *IntTest) vs everything else; used by `make unit-test` / `make int-test`.
 val integrationTestPatterns = listOf("**/*IntegrationTest.class", "**/*IntTest.class")
 
+// The manual smoke against the real, paid Gemini API: excluded from every routine test task.
+val liveSmokePattern = "**/*LiveSmoke.class"
+
+tasks.named<Test>("test") {
+	exclude(liveSmokePattern)
+}
+
 tasks.register<Test>("unitTest") {
 	testClassesDirs = sourceSets["test"].output.classesDirs
 	classpath = sourceSets["test"].runtimeClasspath
 	exclude(integrationTestPatterns)
+	exclude(liveSmokePattern)
 }
 
 tasks.register<Test>("integrationTest") {
@@ -57,6 +65,19 @@ tasks.register<Test>("integrationTest") {
 	include(integrationTestPatterns)
 	// Docker daemon state is not a tracked input; never report ITs as UP-TO-DATE.
 	outputs.upToDateWhen { false }
+}
+
+// MANUAL, PAID: one real Gemini call with the key file (default ../../infra/secrets/gemini.key,
+// override with -PkeyFile=...). Run by hand only, see the M4-10 smoke procedure in PLAN.md.
+tasks.register<Test>("geminiSmoke") {
+	testClassesDirs = sourceSets["test"].output.classesDirs
+	classpath = sourceSets["test"].runtimeClasspath
+	filter { includeTestsMatching("*GeminiLiveSmoke") }
+	systemProperty("trippie.gemini.smoke", "true")
+	systemProperty("trippie.gemini.smoke.key-file",
+		file(project.findProperty("keyFile")?.toString() ?: "../../infra/secrets/gemini.key").absolutePath)
+	outputs.upToDateWhen { false }
+	testLogging { showStandardStreams = true }
 }
 
 // Gradle silently skips a Test task whose filter matches no class (BUILD SUCCESSFUL, zero tests).

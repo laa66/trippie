@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 import com.laa66.worker.domain.model.ContentMode;
+import com.laa66.worker.domain.model.FailedClass;
 import com.laa66.worker.domain.model.GenerateContentTask;
 import com.laa66.worker.domain.model.PoiContentKey;
 import com.laa66.worker.infrastructure.messaging.GenerationTopology;
@@ -63,6 +64,16 @@ class ContentContractTest {
 
 		assertThat(Arrays.stream(body.group(1).split(",")).map(String::trim).toList())
 				.isEqualTo(Arrays.stream(ContentMode.values()).map(Enum::name).toList());
+	}
+
+	/** The write-back (M4-11) sends the constant name; content stores it under a CHECK. */
+	@Test
+	void theFailureClassesAreContents() throws IOException {
+		Matcher body = Pattern.compile("enum FailedClass \\{\\s*([^}]*?)\\s*}").matcher(read("domain/model/FailedClass.java"));
+		assertThat(body.find()).isTrue();
+
+		assertThat(Arrays.stream(body.group(1).split(",")).map(String::trim).toList())
+				.isEqualTo(Arrays.stream(FailedClass.values()).map(Enum::name).toList());
 	}
 
 	private static String read(String relative) throws IOException {

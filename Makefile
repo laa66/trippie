@@ -2,6 +2,7 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml
 MBTILES := infra/tiles/wroclaw.mbtiles
+GEMINI_KEY := infra/secrets/gemini.key
 
 build:
 	$(COMPOSE) build
@@ -11,11 +12,28 @@ build:
 # Guard: the mbtiles must already exist as a FILE. If it is missing, Docker would
 # create a root-owned directory at the bind-mount path and tileserver-gl would
 # crash-loop — fail fast instead and point at `make tiles`.
+# The Gemini key file is created EMPTY when absent, for the same bind-mount reason; the worker then
+# boots without consuming (health DOWN) until the user pastes the key into it. Only its size is
+# checked here, never its content. Mode 644, NOT 600: the worker runs as a non-root user and reads
+# the key off a host-owned bind mount, exactly like make auth-keys. Do not "fix" this to 600.
 up:
 	@test -f "$(MBTILES)" || { \
 		echo "ERROR: $(MBTILES) missing (or not a file). Run \`make tiles\` first."; \
 		exit 1; \
 	}
+	@test ! -d "$(GEMINI_KEY)" || { \
+		echo "ERROR: $(GEMINI_KEY) is a directory (left by a bind mount). Remove it and run \`make up\` again."; \
+		exit 1; \
+	}
+	@mkdir -p "$(dir $(GEMINI_KEY))"
+	@if [ ! -e "$(GEMINI_KEY)" ]; then \
+		install -m 644 /dev/null "$(GEMINI_KEY)"; \
+		echo "WARNING: created an EMPTY $(GEMINI_KEY). The worker consumes nothing (health DOWN) until you"; \
+		echo "WARNING: paste the Gemini API key into it and run: $(COMPOSE) restart worker"; \
+	elif [ ! -s "$(GEMINI_KEY)" ]; then \
+		echo "WARNING: $(GEMINI_KEY) is empty. The worker consumes nothing (health DOWN) until you"; \
+		echo "WARNING: paste the Gemini API key into it and run: $(COMPOSE) restart worker"; \
+	fi
 	$(COMPOSE) up -d
 
 # -v also removes the named volumes (postgres-data, rabbitmq-data). Top-level

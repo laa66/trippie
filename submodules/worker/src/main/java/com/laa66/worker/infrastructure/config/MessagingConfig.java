@@ -2,6 +2,8 @@ package com.laa66.worker.infrastructure.config;
 
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
@@ -11,10 +13,13 @@ import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.amqp.autoconfigure.SimpleRabbitListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.laa66.worker.domain.model.ProviderCredentialRejectedException;
 import com.laa66.worker.domain.port.in.TaskConsumer;
 import com.laa66.worker.infrastructure.messaging.GenerationTaskListener;
 import com.laa66.worker.infrastructure.messaging.GenerationTopology;
@@ -26,6 +31,8 @@ import com.laa66.worker.infrastructure.messaging.TaskRetryPolicy;
  */
 @Configuration
 public class MessagingConfig {
+
+	private static final Logger log = LoggerFactory.getLogger(MessagingConfig.class);
 
 	/**
 	 * The worker is a serial pipeline, not a pool: one consumer, one message in flight. Under 15 RPM
@@ -67,10 +74,18 @@ public class MessagingConfig {
 	 * stops is requeued by Spring AMQP whatever this says. {@code mismatchedQueuesFatal}
 	 * stops the boot when the broker holds the queue with other arguments (no dead-letter exchange),
 	 * where a rejected task would vanish.
+	 *
+	 * <p>Without a provider key the container is created but never started: the tasks stay in the
+	 * queue for a worker that can serve them (see {@link GeminiConfig}). A key the provider refuses
+	 * later ends in the same state: the container is stopped, that task is requeued, and
+	 * {@code /health} says why. It is not restarted here; the key file is read only at startup, so a
+	 * restart is the fix.
 	 */
 	@Bean
 	SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
-			SimpleRabbitListenerContainerFactoryConfigurer configurer, ConnectionFactory connectionFactory) {
+			SimpleRabbitListenerContainerFactoryConfigurer configurer, ConnectionFactory connectionFactory,
+			ApiKeyFile geminiApiKeyFile, GeminiKeyHealth geminiHealthIndicator,
+			ObjectProvider<RabbitListenerEndpointRegistry> listeners) {
 		SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
 		configurer.configure(factory, connectionFactory);
 		factory.setConcurrentConsumers(CONSUMER_CONCURRENCY);
@@ -79,8 +94,24 @@ public class MessagingConfig {
 		factory.setAcknowledgeMode(AcknowledgeMode.AUTO);
 		factory.setDefaultRequeueRejected(false);
 		factory.setMismatchedQueuesFatal(true);
-		factory.setAdviceChain(TaskRetryPolicy.interceptor());
+		factory.setAdviceChain(TaskRetryPolicy.interceptor(
+				rejected -> stopConsuming(rejected, geminiHealthIndicator, listeners.getObject())));
+		factory.setAutoStartup(geminiApiKeyFile instanceof ApiKeyFile.Loaded);
 		return factory;
+	}
+
+	/**
+	 * Runs on the consumer thread, inside the delivery. {@code stop(Runnable)} cancels the consumer on
+	 * the broker at once and leaves the waiting for this thread to another one; the plain
+	 * {@code stop()} would block here, up to the shutdown timeout, on the delivery that calls it.
+	 */
+	static void stopConsuming(ProviderCredentialRejectedException rejected, GeminiKeyHealth health,
+			RabbitListenerEndpointRegistry listeners) {
+		String reason = rejected.getMessage() + "; put a valid key into the key file and restart the worker";
+		log.error("Gemini refused the API key, generation tasks will not be consumed: {}", reason);
+		health.keyRejected(reason);
+		listeners.getListenerContainer(GenerationTaskListener.LISTENER_ID).stop(() -> {
+		});
 	}
 
 	@Bean

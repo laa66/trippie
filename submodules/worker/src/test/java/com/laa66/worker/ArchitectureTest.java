@@ -24,6 +24,8 @@ class ArchitectureTest {
 				"com.laa66.worker.domain.model.GenerateContentTask",
 				"com.laa66.worker.domain.port.in.TaskConsumer",
 				"com.laa66.worker.domain.service.ProviderCallPacer",
+				"com.laa66.worker.domain.port.out.TextGenerator",
+				"com.laa66.worker.infrastructure.client.GeminiTextGenerator",
 				"com.laa66.worker.infrastructure.messaging.GenerationTaskListener");
 
 		assertThat(PRODUCTION_CLASSES.stream().map(JavaClass::getName))

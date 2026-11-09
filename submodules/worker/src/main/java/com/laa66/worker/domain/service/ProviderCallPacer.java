@@ -5,6 +5,9 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
+import com.laa66.worker.domain.model.FailedClass;
+import com.laa66.worker.domain.model.TextGenerationException;
+
 /**
  * Keeps the starts of provider calls at least {@link #MIN_PROVIDER_CALL_SPACING} apart.
  *
@@ -21,6 +24,9 @@ import java.util.function.Supplier;
  * <p>The wait holds a lock and the call does not: two callers can never take the same slot, and a
  * slow call does not delay the next one beyond the spacing. A {@link ReentrantLock} and not
  * {@code synchronized}, which on JDK 21 pins the virtual thread's carrier for the whole sleep.
+ *
+ * <p>An interrupt during the wait is {@code TRANSIENT}, as in the adapter (review M4-09): the call
+ * was never made, so nothing about the POI is known. The interrupt flag is kept.
  */
 public class ProviderCallPacer {
 
@@ -79,7 +85,7 @@ public class ProviderCallPacer {
 		}
 		catch (InterruptedException ex) {
 			Thread.currentThread().interrupt();
-			throw new IllegalStateException("interrupted waiting for the provider call slot", ex);
+			throw new TextGenerationException(FailedClass.TRANSIENT, "interrupted waiting for the provider call slot", ex);
 		}
 		finally {
 			lock.unlock();
