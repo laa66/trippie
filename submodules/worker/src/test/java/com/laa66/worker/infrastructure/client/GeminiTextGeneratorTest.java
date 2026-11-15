@@ -51,7 +51,7 @@ class GeminiTextGeneratorTest {
 
 	private static final int MAX_OUTPUT_TOKENS = 1024;
 
-	private static final PoiPrompt PROMPT = new PoiPrompt("Ratusz", PoiCategory.ARCHITECTURE, "pl");
+	private static final PoiPrompt PROMPT = new PoiPrompt("Ratusz", PoiCategory.ARCHITECTURE, "pl", Map.of());
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -336,6 +336,67 @@ class GeminiTextGeneratorTest {
 		caller.interrupt();
 		caller.join(5_000);
 		return thrown.get();
+	}
+
+	// --- no failure detail carries a URL or a host --------------------------------------------
+
+	/**
+	 * Gate M4-15: a refused connection stored {@code I/O error on POST request for
+	 * "http://127.0.0.1:9/v1beta/models/...:generateContent": null} as {@code failed_detail}.
+	 */
+	@Test
+	void aRefusedConnectionNamesOnlyTheTypeOfItsCause() throws IOException {
+		String baseUrl = closedPortUrl();
+
+		TextGenerationException failure = failureOf(generator(baseUrl, Duration.ofSeconds(2)));
+
+		assertThat(failure.getMessage()).isEqualTo("gemini: no answer from the provider (ConnectException)");
+		assertNoAddressIn(failure.getMessage(), baseUrl);
+	}
+
+	@Test
+	@Timeout(10)
+	void aTimeoutNamesNoUrl() {
+		stub.stallInBody();
+
+		TextGenerationException failure = failureOf(generator(stub.baseUrl(), Duration.ofSeconds(1)));
+
+		assertThat(failure.getMessage()).startsWith("gemini: no answer from the provider (");
+		assertNoAddressIn(failure.getMessage(), stub.baseUrl());
+	}
+
+	/** RFC 6761 reserves {@code .invalid}; with or without a network, no answer comes. */
+	@Test
+	@Timeout(20)
+	void anUnresolvableHostIsNotNamed() {
+		TextGenerationException failure = failureOf(generator("http://gemini-host.invalid:8443", Duration.ofSeconds(2)));
+
+		assertThat(failure.failedClass()).isEqualTo(FailedClass.TRANSIENT);
+		assertThat(failure.getMessage()).doesNotContain("gemini-host").doesNotContain("invalid");
+		assertNoAddressIn(failure.getMessage(), "http://gemini-host.invalid:8443");
+	}
+
+	/**
+	 * Gemini's own error messages link its docs; the detail keeps the words, not the link. A 403 is a
+	 * rejected key, whose message becomes the {@code /health} reason, so it is scrubbed the same way.
+	 */
+	@ParameterizedTest
+	@ValueSource(ints = { 400, 403, 404, 429, 500, 503 })
+	void aUrlInTheProvidersErrorMessageIsDropped(int status) {
+		stub.respondJson(status, error(status, "X",
+				"Failed. For more information, head to: https://ai.google.dev/gemini-api/docs/troubleshooting."));
+
+		Throwable failure = catchThrowable(() -> generator().generate(PROMPT));
+
+		assertThat(failure).isInstanceOfAny(TextGenerationException.class, ProviderCredentialRejectedException.class);
+		assertThat(failure.getMessage()).endsWith("HTTP " + status + " X: Failed. For more information, head to: <url>")
+				.doesNotContain("://").doesNotContain("ai.google.dev");
+	}
+
+	private static void assertNoAddressIn(String detail, String baseUrl) {
+		String hostAndPort = baseUrl.replaceFirst("^https?://", "");
+		assertThat(detail).doesNotContain("://").doesNotContain(hostAndPort).doesNotContain("/v1beta")
+				.doesNotContain(MODEL);
 	}
 
 	// --- the key never leaks into a failure ------------------------------------------------

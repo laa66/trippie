@@ -3,6 +3,7 @@ package com.laa66.worker.domain.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -18,7 +19,7 @@ import com.laa66.worker.support.ManualClock;
 
 class PacedTextGeneratorTest {
 
-	private static final PoiPrompt PROMPT = new PoiPrompt("Ratusz", PoiCategory.ARCHITECTURE, "pl");
+	private static final PoiPrompt PROMPT = new PoiPrompt("Ratusz", PoiCategory.ARCHITECTURE, "pl", Map.of());
 
 	private final ManualClock clock = new ManualClock(0);
 

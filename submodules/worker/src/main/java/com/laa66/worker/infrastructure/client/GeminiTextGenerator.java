@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,8 +73,9 @@ public class GeminiTextGenerator implements TextGenerator {
 	public static final String THINKING_LEVEL = "MINIMAL";
 
 	/**
-	 * Longest text accepted, in characters. 250 Polish words are about 1 900; content's own backstop
-	 * is 16 384 and is not meant to be met.
+	 * Longest text accepted, in characters. 150 Polish words are about 1 150, and the shipped output
+	 * limit cannot produce much over 2 700; content's own backstop is 16 384 and is not meant to be
+	 * met.
 	 */
 	public static final int MAX_TEXT_LENGTH = 4_000;
 
@@ -83,6 +85,8 @@ public class GeminiTextGenerator implements TextGenerator {
 	private static final int MAX_DETAIL_LENGTH = 300;
 
 	private static final String PATH = "/v1beta/models/{model}:generateContent";
+
+	private static final Pattern URL = Pattern.compile("(?i)\\b[a-z][a-z0-9+.-]*://\\S*");
 
 	/** The {@code google.rpc.ErrorInfo} reason Gemini gives, with a 400, for a key it does not know. */
 	static final String API_KEY_INVALID = "API_KEY_INVALID";
@@ -117,8 +121,20 @@ public class GeminiTextGenerator implements TextGenerator {
 		catch (ResourceAccessException ex) {
 			// Timeouts, refused connections and an interrupted blocking call all land here. The
 			// interrupt flag is restored by the request factory, so the caller still sees it.
-			throw failure(FailedClass.TRANSIENT, "no answer from the provider: " + ex.getMessage(), ex);
+			throw failure(FailedClass.TRANSIENT, "no answer from the provider (" + causeType(ex) + ")", ex);
 		}
+	}
+
+	/**
+	 * Spring's message names the request URL ({@code I/O error on POST request for "http://..."}),
+	 * and the I/O exception under it may name the host ({@code UnknownHostException}); the detail
+	 * becomes {@code failed_detail}, so only the type of that I/O exception goes into it
+	 * ({@code ConnectException}, {@code HttpTimeoutException}...). Its own cause is less telling: a
+	 * refused connection bottoms out in {@code ClosedChannelException}.
+	 */
+	private static String causeType(ResourceAccessException failure) {
+		Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+		return cause.getClass().getSimpleName();
 	}
 
 	private Map<String, Object> requestBody(PoiPrompt prompt) {
@@ -247,9 +263,12 @@ public class GeminiTextGenerator implements TextGenerator {
 		return new TextGenerationException(failedClass, scrubbed(detail), cause);
 	}
 
-	/** Every detail is cut and scrubbed of the key, since part of it comes from the provider's body. */
+	/**
+	 * Every detail is cut and scrubbed of the key and of URLs, since part of it comes from the
+	 * provider's body (Gemini's 429 message links its docs) and it becomes {@code failed_detail}.
+	 */
 	private String scrubbed(String detail) {
-		String scrubbed = apiKey.redact(detail);
+		String scrubbed = URL.matcher(apiKey.redact(detail)).replaceAll("<url>");
 		return "gemini: " + (scrubbed.length() > MAX_DETAIL_LENGTH ? scrubbed.substring(0, MAX_DETAIL_LENGTH) : scrubbed);
 	}
 }

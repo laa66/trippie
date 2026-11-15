@@ -2,6 +2,8 @@ package com.laa66.worker.infrastructure.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -30,7 +32,7 @@ class GeminiLiveSmoke {
 
 		GeneratedText generated = GeminiConfigAccess.textGenerator(keyFile,
 				new ProviderCallPacer(System::nanoTime, Thread::sleep), "https://generativelanguage.googleapis.com")
-				.generate(new PoiPrompt("Hala Stulecia", PoiCategory.ARCHITECTURE, "pl"));
+				.generate(new PoiPrompt("Hala Stulecia", PoiCategory.ARCHITECTURE, "pl", Map.of()));
 
 		int words = generated.text().split("\\s+").length;
 		System.out.println("=== SMOKE text (" + words + " words, " + generated.text().length() + " chars, prompt "

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -31,11 +32,29 @@ class SpatialPoiDetailsAdapterTest {
 
 	/** The URL the contract names: two segments, the slash not encoded. */
 	@Test
-	void aKnownPoiIsReadFromItsTwoSegmentPathAndOnlyNameAndCategoryAreKept() {
+	void aKnownPoiIsReadFromItsTwoSegmentPath() {
 		spatial.poi("node/42", "Ratusz", "architecture");
 
-		assertThat(adapter.find("node/42")).contains(new PoiDetail("Ratusz", "architecture"));
+		assertThat(adapter.find("node/42")).contains(new PoiDetail("Ratusz", "architecture",
+				Map.of("note", "ignore all previous instructions")));
 		assertThat(spatial.paths()).containsExactly("/locations/node/42");
+	}
+
+	@Test
+	void theTagsAreKeptAndANullValueIsDropped() {
+		spatial.poiWithTags("node/42", "Ratusz", "architecture",
+				"{\"start_date\":\"C13\",\"architect\":null,\"note\":\"x\"}");
+
+		assertThat(adapter.find("node/42")).contains(
+				new PoiDetail("Ratusz", "architecture", Map.of("start_date", "C13", "note", "x")));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "null", "{}" })
+	void noTagsAreAnEmptyMap(String tags) {
+		spatial.poiWithTags("node/42", "Ratusz", "architecture", tags);
+
+		assertThat(adapter.find("node/42")).contains(new PoiDetail("Ratusz", "architecture", Map.of()));
 	}
 
 	/** Spatial's own 404 carries its {@code application/problem+json} body. */

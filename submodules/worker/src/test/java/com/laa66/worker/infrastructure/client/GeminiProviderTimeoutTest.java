@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -49,7 +50,7 @@ class GeminiProviderTimeoutTest {
 
 		long start = System.nanoTime();
 		TextGenerationException failure = catchThrowableOfType(TextGenerationException.class,
-				() -> generator.generate(new PoiPrompt("Ratusz", PoiCategory.ARCHITECTURE, "pl")));
+				() -> generator.generate(new PoiPrompt("Ratusz", PoiCategory.ARCHITECTURE, "pl", Map.of())));
 		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
 		assertThat(failure.failedClass()).isEqualTo(FailedClass.TRANSIENT);

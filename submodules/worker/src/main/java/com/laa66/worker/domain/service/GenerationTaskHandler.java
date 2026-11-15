@@ -12,6 +12,7 @@ import com.laa66.worker.domain.model.GeneratedText;
 import com.laa66.worker.domain.model.PermanentTaskException;
 import com.laa66.worker.domain.model.PoiCategory;
 import com.laa66.worker.domain.model.PoiDetail;
+import com.laa66.worker.domain.model.PoiFact;
 import com.laa66.worker.domain.model.PoiPrompt;
 import com.laa66.worker.domain.model.TextGenerationException;
 import com.laa66.worker.domain.model.TransientTaskException;
@@ -97,7 +98,8 @@ public class GenerationTaskHandler implements TaskConsumer {
 
 	private static PoiPrompt prompt(GenerateContentTask task, PoiDetail detail) {
 		try {
-			return new PoiPrompt(detail.name(), PoiCategory.fromSlug(detail.category()), task.key().lang());
+			return new PoiPrompt(detail.name(), PoiCategory.fromSlug(detail.category()), task.key().lang(),
+					PoiFact.from(detail.tags()));
 		}
 		catch (IllegalArgumentException ex) {
 			throw new PermanentTaskException("POI cannot be described: " + ex.getMessage());

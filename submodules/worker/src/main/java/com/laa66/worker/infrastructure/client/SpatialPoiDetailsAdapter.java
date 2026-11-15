@@ -1,5 +1,7 @@
 package com.laa66.worker.infrastructure.client;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -76,7 +78,7 @@ public class SpatialPoiDetailsAdapter implements PoiDetails {
 						if (payload == null) {
 							throw new TransientTaskException("spatial sent an empty detail of " + osmId);
 						}
-						return Optional.of(new PoiDetail(payload.name(), payload.category()));
+						return Optional.of(new PoiDetail(payload.name(), payload.category(), scalarTags(payload.tags())));
 					});
 		}
 		catch (RestClientException | InvalidMediaTypeException ex) {
@@ -104,7 +106,21 @@ public class SpatialPoiDetailsAdapter implements PoiDetails {
 	record ProblemPayload(String detail) {
 	}
 
+	/** Spatial already drops non-scalar values; a JSON {@code null} would still arrive as a null value. */
+	private static Map<String, String> scalarTags(Map<String, String> tags) {
+		if (tags == null) {
+			return Map.of();
+		}
+		Map<String, String> scalar = new HashMap<>();
+		tags.forEach((key, value) -> {
+			if (key != null && value != null) {
+				scalar.put(key, value);
+			}
+		});
+		return scalar;
+	}
+
 	@JsonIgnoreProperties(ignoreUnknown = true)
-	record DetailPayload(String name, String category) {
+	record DetailPayload(String name, String category, Map<String, String> tags) {
 	}
 }

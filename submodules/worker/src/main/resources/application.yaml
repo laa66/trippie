@@ -36,8 +36,10 @@ trippie:
     base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
     model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
     # Thinking tokens count against this limit (thinking pinned to MINIMAL in GeminiTextGenerator).
-    # 250 Polish words are ~500 output tokens; re-check against the smoke measurement in PROGRESS.md.
-    max-output-tokens: ${GEMINI_MAX_OUTPUT_TOKENS:1024}
+    # pl-guide-2 asks for at most 150 Polish words, ~340 output tokens at the ~2.25 tokens/word
+    # measured in M4-10. A cut answer (MAX_TOKENS) is PERMANENT, a lost POI, so the limit keeps a
+    # ~2x margin over an overshooting answer; unused headroom is not billed.
+    max-output-tokens: ${GEMINI_MAX_OUTPUT_TOKENS:768}
   # Content (the pre-check and the write-back, on its internal surface) and spatial (the POI
   # detail), service roots inside the compose network. Unreachable is a transient failure of the
   # task, so neither is a depends_on. The request timeout is WorkerConfig.SERVICE_TIMEOUT, a constant.
