@@ -153,7 +153,40 @@
               <app-notice v-if="s.content" :variant="s.content.variant" role="status">
                 {{ s.content.text }}
               </app-notice>
-              <p v-else class="text-sm text-ink">Pusty obszar zarezerwowany pod przewodnik (M4).</p>
+              <p v-else class="text-sm text-ink">Brak komunikatu o blokadzie, obszar pokazuje stan przewodnika.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">POI sheet guide</h2>
+          <!-- M4-14. Every ContentState of the sheet's content area and footer button, built by the
+               same functions the sheet calls. Progress and the text box are the one thing the sheet
+               and this page each spell out: the text sits OUTSIDE any live region, scrolls past
+               max-h-60, and is interpolated, never raw HTML. -->
+          <div class="space-y-4 rounded-card bg-sunken p-4">
+            <div v-for="s in guideStates" :key="s.label" class="space-y-1">
+              <p class="text-xs text-ink-muted">{{ s.label }}</p>
+              <app-notice v-if="s.notice" :variant="s.notice.variant" :role="s.notice.role">
+                {{ s.notice.text }}
+              </app-notice>
+              <div v-else-if="s.progress" role="status" class="flex flex-nowrap items-center gap-2.5 text-sm text-ink-muted">
+                <q-spinner color="primary" size="20px" aria-hidden="true" />
+                <p>{{ s.progress }}</p>
+              </div>
+              <div
+                v-else-if="s.text"
+                class="max-h-60 overflow-y-auto whitespace-pre-line rounded-field bg-surface p-3 text-sm text-ink"
+              >{{ s.text }}</div>
+              <q-btn v-if="s.notice?.action" flat no-caps class="min-h-11 px-2" color="primary" :label="s.notice.action.label" />
+              <q-btn
+                unelevated
+                no-caps
+                color="primary"
+                class="min-h-11 w-full px-2"
+                :disable="!s.button.enabled"
+                :label="s.button.label"
+              />
             </div>
           </div>
         </section>
@@ -200,11 +233,13 @@ import {
   QItemLabel,
   QOptionGroup,
   QToggle,
+  QSpinner,
 } from 'quasar'
 import AppLogo from '@/components/ui/AppLogo.vue'
 import AppNotice from '@/components/ui/AppNotice.vue'
 import { CATEGORY_LABELS, CATEGORY_SLUGS } from '@/composables/useCategorySelection'
-import { poiContentMessage } from '@/lib/poiDetail'
+import type { ContentState } from '@/composables/useContentGeneration'
+import { contentNotice, contentProgressText, generateButton, poiContentMessage } from '@/lib/poiDetail'
 
 // The canvas for M2.5-06: states that are awkward to reach on a live screen (a field in error, a
 // button mid-request) sit here side by side. Dev-only route, dynamically imported, so it never
@@ -220,6 +255,29 @@ const poiSheetStates = [
   { label: 'Zablokowany, dokładność 0 (CDP/Playwright)', content: poiContentMessage(false, 0, true) },
   { label: 'Zablokowany, bliskość NIE wymagana', content: poiContentMessage(false, 140, false) },
 ]
+const SAMPLE_GUIDE_TEXT = Array.from(
+  { length: 6 },
+  () => 'Rynek we Wrocławiu to jedno z największych miejskich centrów w Europie, otoczone kamienicami z różnych epok.',
+).join('\n\n')
+const guideContents: { label: string; content: ContentState }[] = [
+  { label: 'Wczytywanie', content: { kind: 'loading' } },
+  { label: 'Nie wygenerowany', content: { kind: 'absent' } },
+  { label: 'Generowanie', content: { kind: 'processing' } },
+  { label: 'Gotowy (tekst, przewija się)', content: { kind: 'completed', text: SAMPLE_GUIDE_TEXT } },
+  { label: 'Trwa dłużej niż zwykle', content: { kind: 'takingLong' } },
+  { label: 'Odmowa 403 (wyścig z odblokowaniem)', content: { kind: 'locked' } },
+  { label: 'Odmowa 503 i 422', content: { kind: 'unavailable' } },
+  { label: 'Porażka TRANSIENT', content: { kind: 'failed', failedClass: 'TRANSIENT' } },
+  { label: 'Porażka PERMANENT', content: { kind: 'failed', failedClass: 'PERMANENT' } },
+  { label: 'Porażka QUOTA', content: { kind: 'failed', failedClass: 'QUOTA' } },
+]
+const guideStates = guideContents.map((s) => ({
+  label: s.label,
+  notice: contentNotice(s.content, true),
+  progress: contentProgressText(s.content),
+  text: s.content.kind === 'completed' ? s.content.text : null,
+  button: generateButton(s.content),
+}))
 const mode = ref('AUDIO')
 const modes = [
   { value: 'TEXT', label: 'Tekst' },

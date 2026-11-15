@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { formatDistance, poiContentMessage } from '@/lib/poiDetail'
+import type { ContentState } from '@/composables/useContentGeneration'
+import { contentNotice, contentProgressText, formatDistance, generateButton, poiContentMessage } from '@/lib/poiDetail'
 
 const WAITING = 'Czekam na pomiar pozycji'
 const COME_CLOSER = 'Podejdź na 50 m, żeby odblokować'
@@ -73,5 +74,73 @@ describe('poiContentMessage', () => {
     expect(poiContentMessage(false, 140, true)?.variant).toBe('warning')
     expect(poiContentMessage(false, 20, true)?.variant).toBe('info')
     expect(poiContentMessage(false, null, true)?.variant).toBe('info')
+  })
+})
+
+const failed = (failedClass: 'TRANSIENT' | 'PERMANENT' | 'QUOTA'): ContentState => ({ kind: 'failed', failedClass })
+
+describe('contentNotice', () => {
+  it('has nothing to say in the states that are silent, progress or text', () => {
+    for (const kind of ['idle', 'loading', 'absent', 'processing'] as const) {
+      expect(contentNotice({ kind }, true)).toBeNull()
+    }
+    expect(contentNotice({ kind: 'completed', text: 'x' }, true)).toBeNull()
+  })
+
+  it('leaves a plain locked POI to poiContentMessage and explains a 403 on an unlocked one', () => {
+    expect(contentNotice({ kind: 'locked' }, false)).toBeNull()
+    expect(contentNotice({ kind: 'locked' }, true)?.text).toBe('To miejsce nie jest jeszcze odblokowane. Podejdź bliżej.')
+  })
+
+  it('reads 422 exactly as 503, and both carry a retry', () => {
+    expect(contentNotice({ kind: 'unsupported' }, true)).toEqual(contentNotice({ kind: 'unavailable' }, true))
+    expect(contentNotice({ kind: 'unavailable' }, true)?.action).toEqual({ label: 'Spróbuj ponownie' })
+  })
+
+  it('taking long carries a refresh', () => {
+    const n = contentNotice({ kind: 'takingLong' }, true)
+    expect(n?.text).toBe('Generowanie trwa dłużej niż zwykle.')
+    expect(n?.action).toEqual({ label: 'Odśwież' })
+  })
+
+  it('a failed generation has no action of its own, whatever the class', () => {
+    for (const c of ['TRANSIENT', 'PERMANENT', 'QUOTA'] as const) {
+      expect(contentNotice(failed(c), true)?.action).toBeNull()
+    }
+  })
+
+  it('only the quota failure promises tomorrow', () => {
+    const texts = (['TRANSIENT', 'PERMANENT', 'QUOTA'] as const).map((c) => contentNotice(failed(c), true)!.text)
+    expect(new Set(texts).size).toBe(3)
+    expect(texts.map((t) => t.includes('jutro'))).toEqual([false, false, true])
+  })
+})
+
+describe('contentProgressText', () => {
+  it('speaks only while loading or processing', () => {
+    expect(contentProgressText({ kind: 'loading' })).toBe('Sprawdzam przewodnik…')
+    expect(contentProgressText({ kind: 'processing' })).toBe('Przygotowuję przewodnik…')
+    expect(contentProgressText({ kind: 'absent' })).toBeNull()
+    expect(contentProgressText({ kind: 'takingLong' })).toBeNull()
+  })
+})
+
+describe('generateButton', () => {
+  it('is enabled exactly for absent, transient and quota', () => {
+    const enabled = (c: ContentState) => generateButton(c).enabled
+    expect(enabled({ kind: 'absent' })).toBe(true)
+    expect(enabled(failed('TRANSIENT'))).toBe(true)
+    expect(enabled(failed('QUOTA'))).toBe(true)
+    expect(enabled(failed('PERMANENT'))).toBe(false)
+    for (const kind of ['idle', 'locked', 'loading', 'processing', 'takingLong', 'unavailable', 'unsupported'] as const) {
+      expect(enabled({ kind })).toBe(false)
+    }
+    expect(enabled({ kind: 'completed', text: 'x' })).toBe(false)
+  })
+
+  it('is labelled "Ponów" only after a transient failure', () => {
+    expect(generateButton(failed('TRANSIENT')).label).toBe('Ponów')
+    expect(generateButton(failed('QUOTA')).label).toBe('Przewodnik')
+    expect(generateButton({ kind: 'absent' }).label).toBe('Przewodnik')
   })
 })
