@@ -400,6 +400,16 @@ class GatewaySecurityIntegrationTest {
 		client.post().uri("/api/content/internal/results").exchange().expectStatus().isUnauthorized();
 	}
 
+	/** M4-11's second worker endpoint is a GET: the deny rule is path-only, whatever the verb. */
+	@Test
+	void internalLeaseCheck_isDeniedWithAndWithoutToken() throws Exception {
+		String token = mint(signingKey, UUID.randomUUID().toString(), ISSUER,
+				Instant.now(), Instant.now().plus(15, ChronoUnit.MINUTES));
+		String uri = "/api/content/internal/lease?poiId=node/42&mode=TEXT&lang=pl&leasedAt=2026-11-09T12:00:00.123456Z";
+		client.get().uri(uri).header("Authorization", "Bearer " + token).exchange().expectStatus().isForbidden();
+		client.get().uri(uri).exchange().expectStatus().isUnauthorized();
+	}
+
 	/**
 	 * What the {@code denyAll} rule really holds, MEASURED here, not reasoned about. Every shape is
 	 * sent with the raw path on the wire (JDK {@code HttpClient} over {@code URI.create}, which

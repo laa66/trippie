@@ -307,6 +307,22 @@ class PostgresContentAdapter implements ContentRepository {
 			  AND started_at = :leasedAt
 			""";
 
+	/**
+	 * The worker's pre-check. {@code started_at >= now() - lease} is the negation of
+	 * {@code lease_over}'s interval arm in {@link #LEASE_SQL}, so the two statements can never both
+	 * call one lease live and takeable. The token is compared for equality, like the fences.
+	 */
+	static final String LEASE_LIVE_SQL = """
+			SELECT EXISTS (
+			    SELECT 1
+			    FROM poi_content
+			    WHERE osm_id = :osmId AND mode = :mode AND lang = :lang
+			      AND status = 'PROCESSING'
+			      AND started_at = :leasedAt
+			      AND started_at >= now() - make_interval(secs => :leaseSeconds)
+			)
+			""";
+
 	static final String FIND_SQL = """
 			SELECT status, text, failed_class
 			FROM poi_content
@@ -395,6 +411,17 @@ class PostgresContentAdapter implements ContentRepository {
 			log.debug("release dropped for osmId={} mode={} lang={}: row no longer bears the lease token",
 					key.osmId(), key.mode(), key.lang());
 		}
+	}
+
+	@Override
+	public boolean isLeaseLive(PoiContentKey key, Instant leasedAt) {
+		Objects.requireNonNull(leasedAt, "leasedAt");
+
+		return key(jdbcClient.sql(LEASE_LIVE_SQL), key)
+				.param("leasedAt", timestamp(leasedAt))
+				.param("leaseSeconds", GENERATION_LEASE_TIMEOUT.toSeconds())
+				.query(Boolean.class)
+				.single();
 	}
 
 	@Override

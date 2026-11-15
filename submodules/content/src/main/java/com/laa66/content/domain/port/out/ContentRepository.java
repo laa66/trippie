@@ -223,6 +223,20 @@ public interface ContentRepository {
 	 */
 	void releaseUnpublishedLease(PoiContentKey key, Instant leasedAt);
 
+	/**
+	 * Whether {@code leasedAt} is still the live lease on the row: the row is {@code PROCESSING},
+	 * bears exactly this token, and the lease has not passed {@link #GENERATION_LEASE_TIMEOUT}. The
+	 * worker asks this before every provider attempt (M4-11), so a redelivered task, a task whose
+	 * lease was taken over, released or already completed, and a task whose lease expired while it
+	 * waited spend nothing.
+	 *
+	 * <p>"Not expired" is the exact complement of the takeover predicate in {@link #leaseGeneration}:
+	 * a lease this answers {@code true} for is one no POST may take over at the same instant.
+	 *
+	 * @throws NullPointerException if {@code leasedAt} is null
+	 */
+	boolean isLeaseLive(PoiContentKey key, Instant leasedAt);
+
 	/** The row for one key, or empty when nothing has ever been generated for it. */
 	Optional<PoiContent> find(PoiContentKey key);
 }

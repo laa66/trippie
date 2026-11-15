@@ -112,6 +112,13 @@ public final class GeminiStub implements AutoCloseable {
 		executor.shutdownNow();
 	}
 
+	/** A finished candidate with {@code text}, in the shape {@code generateContent} answers. */
+	public static String ok(String text) {
+		return """
+				{"candidates":[{"content":{"role":"model","parts":[{"text":"%s"}]},"finishReason":"STOP","index":0}],				"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":400,"totalTokenCount":520}}"""
+				.formatted(text);
+	}
+
 	public static void json(HttpExchange exchange, int status, String body) throws IOException {
 		byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 		exchange.getResponseHeaders().add("Content-Type", "application/json");

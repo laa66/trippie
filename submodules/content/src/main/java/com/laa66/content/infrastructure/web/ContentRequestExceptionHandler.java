@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.laa66.content.domain.model.EventPublicationException;
+import com.laa66.content.domain.model.InvalidGeneratedTextException;
 import com.laa66.content.domain.model.PoiNotUnlockedException;
 import com.laa66.content.domain.model.PoiUnlockStateUnavailableException;
 import com.laa66.content.domain.model.UnsupportedContentModeException;
@@ -41,6 +42,12 @@ class ContentRequestExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(UnsupportedContentModeException.class)
 	ProblemDetail handleUnsupportedMode() {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, "Only TEXT content is available");
+	}
+
+	/** A worker's text that cannot be stored; the worker records it as a permanent failure. */
+	@ExceptionHandler(InvalidGeneratedTextException.class)
+	ProblemDetail handleInvalidGeneratedText() {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, "Generated text cannot be stored");
 	}
 
 	/** The publisher does not log, so this is the one trace of a task the broker did not take. */

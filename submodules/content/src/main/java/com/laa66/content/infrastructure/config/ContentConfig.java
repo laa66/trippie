@@ -11,11 +11,13 @@ import org.springframework.web.client.RestClient;
 
 import com.laa66.content.domain.port.in.GenerateContent;
 import com.laa66.content.domain.port.in.ReadPoiContent;
+import com.laa66.content.domain.port.in.RecordGenerationResult;
 import com.laa66.content.domain.port.out.ContentRepository;
 import com.laa66.content.domain.port.out.EventPublisher;
 import com.laa66.content.domain.port.out.PoiUnlocks;
 import com.laa66.content.domain.service.GenerateContentService;
 import com.laa66.content.domain.service.ReadPoiContentService;
+import com.laa66.content.domain.service.RecordGenerationResultService;
 import com.laa66.content.infrastructure.cache.CachingPoiUnlocks;
 import com.laa66.content.infrastructure.client.SpatialPoiUnlocksAdapter;
 
@@ -63,5 +65,10 @@ public class ContentConfig {
 	GenerateContent generateContent(PoiUnlocks poiUnlocks, ContentRepository contentRepository,
 			EventPublisher eventPublisher) {
 		return new GenerateContentService(poiUnlocks, contentRepository, eventPublisher);
+	}
+
+	@Bean
+	RecordGenerationResult recordGenerationResult(ContentRepository contentRepository) {
+		return new RecordGenerationResultService(contentRepository);
 	}
 }

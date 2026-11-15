@@ -38,3 +38,10 @@ trippie:
     # Thinking tokens count against this limit (thinking pinned to MINIMAL in GeminiTextGenerator).
     # 250 Polish words are ~500 output tokens; re-check against the smoke measurement in PROGRESS.md.
     max-output-tokens: ${GEMINI_MAX_OUTPUT_TOKENS:1024}
+  # Content (the pre-check and the write-back, on its internal surface) and spatial (the POI
+  # detail), service roots inside the compose network. Unreachable is a transient failure of the
+  # task, so neither is a depends_on. The request timeout is WorkerConfig.SERVICE_TIMEOUT, a constant.
+  content:
+    uri: ${CONTENT_URI:http://content:8080}
+  spatial:
+    uri: ${SPATIAL_URI:http://spatial:8080}

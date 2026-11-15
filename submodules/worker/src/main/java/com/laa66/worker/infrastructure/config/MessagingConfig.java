@@ -13,12 +13,14 @@ import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.listener.AbstractMessageListenerContainer;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.amqp.autoconfigure.SimpleRabbitListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.laa66.worker.domain.model.ConsumerMustStopException;
 import com.laa66.worker.domain.model.ProviderCredentialRejectedException;
 import com.laa66.worker.domain.port.in.TaskConsumer;
 import com.laa66.worker.infrastructure.messaging.GenerationTaskListener;
@@ -70,21 +72,23 @@ public class MessagingConfig {
 	 * outside it, in the container's own steps before the listener (splitting a body that carries
 	 * Spring's batch header): rejected without requeue, so dead-lettered, where Boot's default would
 	 * requeue it straight back to this consumer in a hot loop. It is NOT a fallback for a missing
-	 * recoverer (see {@link TaskRetryPolicy#interceptor()}). A message rejected while the container
+	 * recoverer (see {@link TaskRetryPolicy#interceptor}). A message rejected while the container
 	 * stops is requeued by Spring AMQP whatever this says. {@code mismatchedQueuesFatal}
 	 * stops the boot when the broker holds the queue with other arguments (no dead-letter exchange),
 	 * where a rejected task would vanish.
 	 *
 	 * <p>Without a provider key the container is created but never started: the tasks stay in the
 	 * queue for a worker that can serve them (see {@link GeminiConfig}). A key the provider refuses
-	 * later ends in the same state: the container is stopped, that task is requeued, and
-	 * {@code /health} says why. It is not restarted here; the key file is read only at startup, so a
+	 * later, or content or spatial answering as a service the worker is not meant to talk to, ends in
+	 * the same state: the container is stopped, that task is requeued, and {@code /health} says why.
+	 * It is not restarted here; the key file and the service URIs are read only at startup, so a
 	 * restart is the fix.
 	 */
 	@Bean
 	SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
 			SimpleRabbitListenerContainerFactoryConfigurer configurer, ConnectionFactory connectionFactory,
-			ApiKeyFile geminiApiKeyFile, GeminiKeyHealth geminiHealthIndicator,
+			ApiKeyFile geminiApiKeyFile, GeminiKeyHealth geminiHealthIndicator, ConsumerHealth consumerHealthIndicator,
+			TaskConsumer taskConsumer,
 			ObjectProvider<RabbitListenerEndpointRegistry> listeners) {
 		SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
 		configurer.configure(factory, connectionFactory);
@@ -94,8 +98,8 @@ public class MessagingConfig {
 		factory.setAcknowledgeMode(AcknowledgeMode.AUTO);
 		factory.setDefaultRequeueRejected(false);
 		factory.setMismatchedQueuesFatal(true);
-		factory.setAdviceChain(TaskRetryPolicy.interceptor(
-				rejected -> stopConsuming(rejected, geminiHealthIndicator, listeners.getObject())));
+		factory.setAdviceChain(TaskRetryPolicy.interceptor(taskConsumer::giveUp,
+				stop -> stopConsuming(stop, consumerHealthIndicator, geminiHealthIndicator, listeners.getObject())));
 		factory.setAutoStartup(geminiApiKeyFile instanceof ApiKeyFile.Loaded);
 		return factory;
 	}
@@ -105,17 +109,28 @@ public class MessagingConfig {
 	 * the broker at once and leaves the waiting for this thread to another one; the plain
 	 * {@code stop()} would block here, up to the shutdown timeout, on the delivery that calls it.
 	 */
-	static void stopConsuming(ProviderCredentialRejectedException rejected, GeminiKeyHealth health,
+	static void stopConsuming(ConsumerMustStopException stop, ConsumerHealth health, GeminiKeyHealth geminiHealth,
 			RabbitListenerEndpointRegistry listeners) {
-		String reason = rejected.getMessage() + "; put a valid key into the key file and restart the worker";
-		log.error("Gemini refused the API key, generation tasks will not be consumed: {}", reason);
-		health.keyRejected(reason);
+		String reason = stop.getMessage() + "; " + stop.remedy();
+		log.error("Generation tasks will not be consumed: {}", reason);
+		health.stopped(reason);
+		if (stop instanceof ProviderCredentialRejectedException) {
+			geminiHealth.keyRejected(reason);
+		}
 		listeners.getListenerContainer(GenerationTaskListener.LISTENER_ID).stop(() -> {
 		});
 	}
 
 	@Bean
-	GenerationTaskListener generationTaskListener(TaskConsumer taskConsumer) {
-		return new GenerationTaskListener(taskConsumer);
+	ConsumerHealth consumerHealthIndicator() {
+		return new ConsumerHealth();
+	}
+
+	/** The container turns inactive the moment its stop begins, before it waits for the delivery. */
+	@Bean
+	GenerationTaskListener generationTaskListener(TaskConsumer taskConsumer,
+			ObjectProvider<RabbitListenerEndpointRegistry> listeners) {
+		return new GenerationTaskListener(taskConsumer, () -> !((AbstractMessageListenerContainer) listeners.getObject()
+				.getListenerContainer(GenerationTaskListener.LISTENER_ID)).isActive());
 	}
 }

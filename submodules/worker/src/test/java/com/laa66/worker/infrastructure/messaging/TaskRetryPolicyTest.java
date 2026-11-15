@@ -3,8 +3,10 @@ package com.laa66.worker.infrastructure.messaging;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.commons.logging.LogFactory;
 import org.junit.jupiter.api.Test;
@@ -18,7 +20,9 @@ import org.springframework.amqp.rabbit.support.ListenerExecutionFailedException;
 import org.springframework.core.retry.RetryPolicy;
 import org.springframework.util.backoff.BackOffExecution;
 
+import com.laa66.worker.domain.model.ConsumerMustStopException;
 import com.laa66.worker.domain.model.FailedClass;
+import com.laa66.worker.domain.model.GenerateContentTask;
 import com.laa66.worker.domain.model.PermanentTaskException;
 import com.laa66.worker.domain.model.ProviderCredentialRejectedException;
 import com.laa66.worker.domain.model.TextGenerationException;
@@ -30,7 +34,15 @@ import com.laa66.worker.domain.model.TransientTaskException;
  */
 class TaskRetryPolicyTest {
 
-	private static final Message MESSAGE = MessageBuilder.withBody(new byte[0]).build();
+	private static final Message MESSAGE = MessageBuilder
+			.withBody(GenerationTaskDecodeTest.CONTENT_BODY.getBytes(StandardCharsets.UTF_8)).build();
+
+	private final List<Map.Entry<GenerateContentTask, Throwable>> givenUp = new ArrayList<>();
+
+	private final List<ConsumerMustStopException> reported = new ArrayList<>();
+
+	private final MessageRecoverer recoverer = TaskRetryPolicy.recoverer(
+			(task, failure) -> givenUp.add(Map.entry(task, failure)), reported::add);
 
 	@Test
 	void threeAttemptsWithFiveThenFifteenSecondsBetweenThem() {
@@ -95,26 +107,100 @@ class TaskRetryPolicyTest {
 	 */
 	@Test
 	void aRejectedCredentialIsRequeuedNotDeadLetteredAndReported() {
-		List<ProviderCredentialRejectedException> reported = new ArrayList<>();
-		MessageRecoverer recoverer = TaskRetryPolicy.recoverer(reported::add);
 		ProviderCredentialRejectedException rejected = new ProviderCredentialRejectedException("gemini: HTTP 401");
 
 		Throwable thrown = catchThrowable(() -> recoverer.recover(MESSAGE, wrapped(rejected)));
 
 		assertThat(reported).containsExactly(rejected);
-		assertThat(ContainerUtils.shouldRequeue(false, thrown, LogFactory.getLog(getClass()))).isTrue();
+		assertThat(givenUp).isEmpty();
+		assertThat(requeued(thrown)).isTrue();
+	}
+
+	/** Review M4-11, LOW-3: content or spatial misconfigured takes the credential's path. */
+	@Test
+	void aMisconfiguredServiceIsNotRetriedButRequeuedAndReported() {
+		ConsumerMustStopException stop = new ConsumerMustStopException("content answered HTTP 404 to the lease check", "fix it");
+
+		Throwable thrown = catchThrowable(() -> recoverer.recover(MESSAGE, wrapped(new PermanentTaskException("x", stop))));
+
+		assertThat(TaskRetryPolicy.retryPolicy().shouldRetry(wrapped(new TransientTaskException("x", stop)))).isFalse();
+		assertThat(reported).containsExactly(stop);
+		assertThat(givenUp).isEmpty();
+		assertThat(requeued(thrown)).isTrue();
+	}
+
+	/** Review M4-11 round 2, LOW-2: the failure's own write-back finds content misconfigured. */
+	@Test
+	void aStopMetWhileGivingUpIsRequeuedNotDeadLetteredAndReported() {
+		ConsumerMustStopException stop = new ConsumerMustStopException("content answered HTTP 404 to the failure", "fix it");
+		MessageRecoverer stopping = TaskRetryPolicy.recoverer((task, failure) -> {
+			throw stop;
+		}, reported::add);
+
+		Throwable thrown = catchThrowable(() -> stopping.recover(MESSAGE, wrapped(new PermanentTaskException("x"))));
+
+		assertThat(reported).containsExactly(stop);
+		assertThat(requeued(thrown)).isTrue();
 	}
 
 	@Test
-	void anyOtherFinalFailureIsDeadLetteredAndNotReported() {
-		List<ProviderCredentialRejectedException> reported = new ArrayList<>();
-		MessageRecoverer recoverer = TaskRetryPolicy.recoverer(reported::add);
+	void anyOtherFinalFailureIsGivenUpThenDeadLettered() {
+		ListenerExecutionFailedException failure = wrapped(new TextGenerationException(FailedClass.PERMANENT, "gemini: HTTP 404"));
 
-		Throwable thrown = catchThrowable(() -> recoverer.recover(MESSAGE,
-				wrapped(new TextGenerationException(FailedClass.PERMANENT, "gemini: HTTP 404"))));
+		Throwable thrown = catchThrowable(() -> recoverer.recover(MESSAGE, failure));
 
 		assertThat(reported).isEmpty();
-		assertThat(ContainerUtils.shouldRequeue(false, thrown, LogFactory.getLog(getClass()))).isFalse();
+		assertThat(givenUp).containsExactly(Map.entry(GenerationTaskListener.decode(MESSAGE.getBody()), failure));
+		assertThat(requeued(thrown)).isFalse();
+	}
+
+	@Test
+	void anUndecodableBodyIsDeadLetteredWithNothingToGiveUp() {
+		Message garbage = MessageBuilder.withBody("{".getBytes(StandardCharsets.UTF_8)).build();
+
+		Throwable thrown = catchThrowable(() -> recoverer.recover(garbage,
+				wrapped(new PermanentTaskException("undecodable generation task"))));
+
+		assertThat(givenUp).isEmpty();
+		assertThat(requeued(thrown)).isFalse();
+	}
+
+	/**
+	 * Review M4-09 LOW-1 / M4-10: the backoff interrupted by a shutdown ends in the recoverer with the
+	 * interrupt flag set and the last (transient) failure as the cause. Not a failure of the POI.
+	 */
+	@Test
+	void aDeliveryCutShortByAnInterruptIsRequeuedAndNotGivenUp() {
+		Thread.currentThread().interrupt();
+		Throwable thrown;
+		try {
+			thrown = catchThrowable(() -> recoverer.recover(MESSAGE,
+					wrapped(new TextGenerationException(FailedClass.TRANSIENT, "gemini: interrupted"))));
+		}
+		finally {
+			Thread.interrupted();
+		}
+
+		assertThat(givenUp).isEmpty();
+		assertThat(requeued(thrown)).isTrue();
+	}
+
+	@Test
+	void anAttemptRefusedBecauseTheContainerIsStoppingIsRequeuedAndNotGivenUp() {
+		Throwable thrown = catchThrowable(() -> recoverer.recover(MESSAGE, wrapped(new ConsumerStoppingException())));
+
+		assertThat(givenUp).isEmpty();
+		assertThat(requeued(thrown)).isTrue();
+	}
+
+	@Test
+	void aStoppingContainerIsNotRetried() {
+		assertThat(TaskRetryPolicy.retryPolicy().shouldRetry(wrapped(new ConsumerStoppingException()))).isFalse();
+	}
+
+	/** Read through the container's own decision, with this worker's {@code defaultRequeueRejected=false}. */
+	private boolean requeued(Throwable thrown) {
+		return ContainerUtils.shouldRequeue(false, thrown, LogFactory.getLog(getClass()));
 	}
 
 	private static ListenerExecutionFailedException wrapped(Throwable cause) {

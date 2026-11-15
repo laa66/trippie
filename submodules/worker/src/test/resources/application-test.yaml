@@ -12,3 +12,7 @@ trippie:
   gemini:
     api-key-file: src/test/resources/fake-gemini.key
     base-url: http://127.0.0.1:1
+  content:
+    uri: http://127.0.0.1:1
+  spatial:
+    uri: http://127.0.0.1:1

@@ -1,5 +1,7 @@
 package com.laa66.worker.infrastructure.messaging;
 
+import java.util.function.BooleanSupplier;
+
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 
@@ -20,6 +22,11 @@ import tools.jackson.databind.json.JsonMapper;
  * is {@link JsonMapper#shared()} for the reason content's publisher uses it: {@code spring.jackson.*}
  * must not reshape a contract another service writes. The lease token is parsed from its ISO-8601
  * text into an {@code Instant}, which keeps every digit content sent.
+ *
+ * <p>No attempt starts once the container is stopping. Without this check an attempt whose backoff
+ * ends inside the container's shutdown wait runs in full, paid provider call included, while the
+ * application closes (measured in the M4-09 review); with it the attempt ends before the pre-check
+ * and the delivery goes back to the queue ({@link TaskRetryPolicy}).
  */
 public class GenerationTaskListener {
 
@@ -27,12 +34,18 @@ public class GenerationTaskListener {
 
 	private final TaskConsumer consumer;
 
-	public GenerationTaskListener(TaskConsumer consumer) {
+	private final BooleanSupplier stopping;
+
+	public GenerationTaskListener(TaskConsumer consumer, BooleanSupplier stopping) {
 		this.consumer = consumer;
+		this.stopping = stopping;
 	}
 
 	@RabbitListener(id = LISTENER_ID, queues = GenerationTopology.QUEUE)
 	public void onMessage(Message message) {
+		if (stopping.getAsBoolean()) {
+			throw new ConsumerStoppingException();
+		}
 		consumer.consume(decode(message.getBody()));
 	}
 

@@ -39,8 +39,8 @@ import com.laa66.worker.support.ManualClock;
 import com.laa66.worker.support.RabbitContainers;
 
 /**
- * The delivery policy on a live broker, counted. The production {@code TaskConsumer} only logs, so
- * a scripted one stands in for it: what it does is chosen by the task's {@code osmId}, and every
+ * The delivery policy on a live broker, counted, isolated from the pipeline behind it: a scripted
+ * {@code TaskConsumer} stands in for the production handler (which is {@code GenerationIntegrationTest}'s): what it does is chosen by the task's {@code osmId}, and every
  * call is recorded. Everything else is production wiring: the listener, the container factory, the
  * retry interceptor, the topology, the pacer bean.
  *
@@ -128,6 +128,10 @@ class GenerationTaskPipelineIntegrationTest {
 			finally {
 				inFlight.decrementAndGet();
 			}
+		}
+
+		@Override
+		public void giveUp(GenerateContentTask task, Throwable failure) {
 		}
 
 		long attempts(String osmId) {
