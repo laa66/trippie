@@ -24,8 +24,8 @@
       </div>
 
       <div class="min-h-16 px-4 py-2">
-        <app-notice v-if="content !== null" :variant="content.variant" role="status">
-          {{ content.text }}
+        <app-notice v-if="statusMessage !== null" :variant="statusMessage.variant" role="status">
+          {{ statusMessage.text }}
         </app-notice>
       </div>
 
@@ -37,6 +37,7 @@
           color="primary"
           class="min-h-11 w-full px-2"
           label="Przewodnik"
+          @click="emit('generate')"
         />
         <app-notice variant="info" role="status">Przewodnik dostępny wkrótce</app-notice>
       </div>
@@ -48,6 +49,7 @@
 import { computed } from 'vue'
 import { QDialog, QCard, QBtn } from 'quasar'
 import AppNotice from '@/components/ui/AppNotice.vue'
+import type { ContentState } from '@/composables/useContentGeneration'
 import { CATEGORY_LABELS, CATEGORY_SLUGS, type CategorySlug } from '@/composables/useCategorySelection'
 import type { NearbyItem } from '@/lib/nearbyApi'
 import { formatDistance, poiContentMessage } from '@/lib/poiDetail'
@@ -69,8 +71,9 @@ const props = defineProps<{
   accuracyMeters: number | null
   distanceFromFixMeters: number | null
   requireProximity: boolean
+  content: ContentState
 }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; generate: []; refresh: [] }>()
 
 const isOpen = computed({
   get: () => props.poi !== null,
@@ -92,7 +95,7 @@ const subtitle = computed(() => {
   return [label, distance].filter((part) => part !== null).join(' · ')
 })
 
-const content = computed(() =>
+const statusMessage = computed(() =>
   props.poi === null
     ? null
     : poiContentMessage(props.poi.unlocked, props.accuracyMeters, props.requireProximity),

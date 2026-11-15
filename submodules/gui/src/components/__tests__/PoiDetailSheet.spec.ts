@@ -27,7 +27,7 @@ async function open(
   requireProximity = true,
 ) {
   const wrapper = mount(PoiDetailSheet, {
-    props: { poi: p, accuracyMeters, distanceFromFixMeters, requireProximity },
+    props: { poi: p, accuracyMeters, distanceFromFixMeters, requireProximity, content: { kind: 'idle' as const } },
     attachTo: document.body,
   })
   await flushPromises()

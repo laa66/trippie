@@ -51,7 +51,10 @@
           :accuracy-meters="sheetFix?.accuracyMeters ?? null"
           :distance-from-fix-meters="selectedDistanceMeters"
           :require-proximity="requireProximity"
+          :content="contentState"
           @close="selectedPoi = null"
+          @generate="generateContent"
+          @refresh="refreshContent"
         />
       </q-page>
     </q-page-container>
@@ -77,6 +80,7 @@ import { useGeolocation, WROCLAW_FALLBACK, type GeoFix } from '@/composables/use
 import { useNearbyPois, type UseNearbyPois } from '@/composables/useNearbyPois'
 import { useNearbyPoiLayer, type UseNearbyPoiLayer } from '@/composables/useNearbyPoiLayer'
 import { useCategorySelection } from '@/composables/useCategorySelection'
+import { useContentGeneration } from '@/composables/useContentGeneration'
 import { createUnlockClient, type UnlockClient } from '@/lib/unlockClient'
 import type { UnlockResponse } from '@/lib/unlockApi'
 import { POI_LAYER_ID, hitTestBox, pickPoiHit, type PoiHit } from '@/lib/poiLayer'
@@ -222,6 +226,14 @@ const { position, isFallback, error: geoError, fix, start, stop } = useGeolocati
 // each attempt (below), because the user can flip the toggle in /settings and come back without
 // MapView ever being remounted.
 const { requireProximity } = useCategorySelection()
+// Called here and never in the sheet, which stays props-down/event-up: the sheet only says what
+// the user asked for, and the requests, the poll and its teardown live with the view's lifecycle.
+const {
+  state: contentState,
+  generate: generateContent,
+  refresh: refreshContent,
+  stop: stopContent,
+} = useContentGeneration(selectedPoi)
 
 // Built in JS because MapLibre takes a DOM element, not a template — but the colours still come
 // from the token layer (`bg-primary`, `border-ink-inverse`), so the marker re-themes with
@@ -419,7 +431,8 @@ onDeactivated(() => {
   stop()
   isFilterOpen.value = false
   // Same reason as the dialog above: the sheet M3-09 binds to this is teleported too, so a
-  // selection left standing would float over whatever renders next.
+  // selection left standing would float over whatever renders next. Clearing it is also what
+  // aborts the content request and drops its poll.
   selectedPoi.value = null
   wasDeactivated = true
 })
@@ -462,6 +475,7 @@ watch(
 // teardown) or when MapView is mounted outside the cache. Still the single full teardown.
 onUnmounted(() => {
   stop()
+  stopContent()
   poiLayer?.stop()
   poiLayer = null
   nearby?.stop()
